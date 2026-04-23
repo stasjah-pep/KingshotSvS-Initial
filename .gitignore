@@ -1,0 +1,13 @@
+node_modules/
+.env
+dist/
+build/
+coverage/
+.DS_Store
+verification/*.png
+verification/__pycache__/
+verification/test-results/
+*.db
+*.db-journal
+*.db
+hub_database.db

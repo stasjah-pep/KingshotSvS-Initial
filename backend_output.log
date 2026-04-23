@@ -1,0 +1,5 @@
+
+> command-hub@1.0.0 dev
+> concurrently "node server.js" "cd client && npm run dev"
+
+sh: 1: concurrently: not found

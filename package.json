@@ -1,0 +1,24 @@
+{
+  "name": "command-hub",
+  "version": "1.0.0",
+  "description": "Real-time Command Hub for Strategy Games",
+  "scripts": {
+    "postinstall": "cd client && npm install",
+    "db:push": "npx prisma db push",
+    "dev": "concurrently \"node server.js\" \"cd client && npm run dev\"",
+    "start": "concurrently \"node server.js\" \"cd client && npm start\""
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.3.1",
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2",
+    "socket.io-client": "^4.8.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "concurrently": "^9.2.1",
+    "prisma": "^5.22.0"
+  }
+}

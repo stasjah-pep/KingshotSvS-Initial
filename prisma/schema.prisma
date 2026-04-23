@@ -1,0 +1,114 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite" // Changed from postgresql to sqlite for easier prototype setup
+  url      = env("DATABASE_URL")
+}
+
+// User Accounts (Admin/Superadmin/User)
+model Account {
+  id                 String  @id @default(uuid())
+  username           String  @unique
+  password           String // Hashed
+  role               String  @default("USER") // SUPERADMIN, ADMIN, USER
+  isBlocked          Boolean @default(false)
+  mustChangePassword Boolean @default(false)
+
+  // Relations
+  players Player[]
+
+  // Optional OTP fields
+  otp        String?
+  isVerified Boolean @default(false)
+
+  // Session Token
+  sessionToken String? @unique
+
+  // Push Notifications
+  expoPushToken String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model MapLayout {
+  id         String   @id @default(uuid())
+  name       String
+  isActive   Boolean  @default(false)
+  isDefault  Boolean  @default(false)
+  size       Int      @default(40)
+  elements   String   @default("[]") // JSON string for buildings/targets
+  blockZones String   @default("[]") // JSON string for blocking zones
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// In-Game Players (Characters)
+model Player {
+  id    String @id @default(uuid())
+  // Removing gameId integer constraint as we might use string IDs or not need strictly numeric
+  // gameId    Int      @unique
+  name  String
+  power Int
+
+  allianceId String?
+  alliance   Alliance? @relation(fields: [allianceId], references: [id])
+
+  accountId String?  @unique // One account -> One player (mostly)
+  account   Account? @relation(fields: [accountId], references: [id])
+
+  teamId String?
+  team   Team?   @relation(fields: [teamId], references: [id])
+
+  // Game State
+  role   String @default("REINFORCER") // COMMANDER, RALLY_LEADER, CASTLE_TEAM, TURRET_TEAM, REINFORCER, HITMAN
+  status String @default("IDLE") // IDLE, MARCHING, RALLYING, PENDING
+
+  // Map Position
+  x Int?
+  y Int?
+
+  avatar String?
+
+  // March Times (seconds)
+  mtCastle Int?
+  mtNorth  Int?
+  mtEast   Int?
+  mtSouth  Int?
+  mtWest   Int?
+
+  customMarchTimes String @default("{}")
+
+  isMuted   Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Alliance {
+  id   String @id @default(uuid())
+  name String
+  tag  String @unique // Max 3 chars
+
+  players Player[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Team {
+  id      String  @id @default(uuid())
+  name    String
+  isEnemy Boolean @default(false)
+
+  players Player[] // Max 4 players enforced in logic
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

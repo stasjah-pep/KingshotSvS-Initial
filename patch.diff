@@ -1,0 +1,13 @@
+<<<<<<< SEARCH
+  mtSouth  Int?
+  mtWest   Int?
+
+  isMuted   Boolean  @default(false)
+=======
+  mtSouth  Int?
+  mtWest   Int?
+
+  customMarchTimes String @default("{}")
+
+  isMuted   Boolean  @default(false)
+>>>>>>> REPLACE
