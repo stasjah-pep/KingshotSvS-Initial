@@ -1,5 +1,6 @@
 package com.companionapp
 
+import android.app.ActivityManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -166,8 +167,23 @@ class DashboardActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.btnToggleOverlay).setOnClickListener {
-            val intent = Intent("com.companionapp.ACTION_TOGGLE_OVERLAY")
-            sendBroadcast(intent)
+            // Check if service is actually running, if not start it
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            var isRunning = false
+            for (service in am.getRunningServices(Integer.MAX_VALUE)) {
+                if (FloatingOverlayService::class.java.name == service.service.className) {
+                    isRunning = true
+                    break
+                }
+            }
+
+            if (!isRunning) {
+                startOverlayService()
+            } else {
+                val intent = Intent("com.companionapp.ACTION_TOGGLE_OVERLAY")
+                intent.setPackage(packageName)
+                sendBroadcast(intent)
+            }
         }
 
 
@@ -190,16 +206,12 @@ class DashboardActivity : AppCompatActivity() {
             }
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (!Settings.canDrawOverlays(this)) {
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:$packageName")
-                )
-                startActivityForResult(intent, 100)
-            } else {
-                startOverlayService()
-            }
+        if (!Settings.canDrawOverlays(this)) {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            )
+            startActivityForResult(intent, 100)
         } else {
             startOverlayService()
         }
@@ -208,7 +220,7 @@ class DashboardActivity : AppCompatActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == 100) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this)) {
+            if (true && Settings.canDrawOverlays(this)) {
                 startOverlayService()
             } else {
                 Toast.makeText(this, "Overlay permission required", Toast.LENGTH_SHORT).show()
