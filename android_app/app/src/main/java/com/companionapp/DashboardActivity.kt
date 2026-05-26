@@ -35,8 +35,13 @@ class DashboardActivity : AppCompatActivity() {
 
     private val teamsList = mutableListOf<JSONObject>()
     private val ralliesList = mutableListOf<JSONObject>()
+    private val landingsList = mutableListOf<JSONObject>()
     private val buttonsList = mutableListOf<JSONObject>()
+    private val playersList = mutableListOf<JSONObject>()
+    private var isEnemyTeamCreation = false
     private val knownRallyIds = mutableSetOf<String>()
+    private val plannerPlayerOffsets = mutableMapOf<String, Long>()
+    private val targets = arrayOf("Castle", "North Turret", "East Turret", "South Turret", "West Turret")
 
     private lateinit var llColorPicker: LinearLayout
     private lateinit var llTeamList: LinearLayout
@@ -73,6 +78,16 @@ class DashboardActivity : AppCompatActivity() {
                     Toast.makeText(this@DashboardActivity, "No initiator configured. Please claim a player profile on the web hub first.", Toast.LENGTH_LONG).show()
                     return
                 }
+
+                // Block duplicate active rallies
+                val initiatorActiveRally = ralliesList.find { r ->
+                    r.optString("initiatorId") == finalInitiatorId
+                }
+                if (initiatorActiveRally != null) {
+                    Toast.makeText(this@DashboardActivity, "You already have an active rally on ${initiatorActiveRally.optString("target")}!", Toast.LENGTH_SHORT).show()
+                    return
+                }
+
                 val payload = JSONObject()
                 payload.put("initiatorId", finalInitiatorId)
                 payload.put("target", target)
@@ -118,9 +133,142 @@ class DashboardActivity : AppCompatActivity() {
             llEnemyTeams.visibility = if (isEnemyRally) View.VISIBLE else View.GONE
         }
 
+        // --- Commander Launch Planner Bindings & Logic ---
+        val spPlannerTarget = findViewById<Spinner>(R.id.spPlannerTarget)
+        val spPlannerTeam = findViewById<Spinner>(R.id.spPlannerTeam)
+        val spPlannerRallyTime = findViewById<Spinner>(R.id.spPlannerRallyTime)
+        val etPlannerLandingTime = findViewById<EditText>(R.id.etPlannerLandingTime)
+        val tvPlannerOffsetsTitle = findViewById<TextView>(R.id.tvPlannerOffsetsTitle)
+        val llPlannerPlayerOffsets = findViewById<LinearLayout>(R.id.llPlannerPlayerOffsets)
+        val btnPlannerSetLanding = findViewById<Button>(R.id.btnPlannerSetLanding)
+        val btnPlannerCancelLanding = findViewById<Button>(R.id.btnPlannerCancelLanding)
+
+        // Populate Target spinner
+        val targetAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, targets)
+        targetAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        spPlannerTarget.adapter = targetAdapter
+
+        // Populate Add Action Button target spinner
+        val spAddButtonTarget = findViewById<Spinner>(R.id.spAddButtonTarget)
+        spAddButtonTarget.adapter = targetAdapter
+
+        // Configure landing time dynamic input formatting
+        etPlannerLandingTime.inputType = android.text.InputType.TYPE_CLASS_PHONE
+        etPlannerLandingTime.keyListener = android.text.method.DigitsKeyListener.getInstance("0123456789:")
+        etPlannerLandingTime.addTextChangedListener(object : android.text.TextWatcher {
+            private var isUpdating = false
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                if (isUpdating) return
+                isUpdating = true
+
+                val input = s.toString()
+                val clean = input.replace(":", "")
+                val sb = StringBuilder()
+
+                val len = clean.length
+                if (len > 0) {
+                    val hh = clean.substring(0, Math.min(len, 2))
+                    sb.append(hh)
+                    if (len > 2) {
+                        sb.append(":")
+                        val mm = clean.substring(2, Math.min(len, 4))
+                        sb.append(mm)
+                        if (len > 4) {
+                            sb.append(":")
+                            val ss = clean.substring(4, Math.min(len, 6))
+                            sb.append(ss)
+                        }
+                    }
+                }
+
+                val formatted = sb.toString()
+                if (formatted != input) {
+                    s?.replace(0, s.length, formatted)
+                }
+                isUpdating = false
+            }
+        })
+
+        // Populate Rally prep spinner
+        val rallyPrepDurations = arrayOf("1 Min", "2 Min", "5 Min", "10 Min")
+        val rallyAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, rallyPrepDurations)
+        rallyAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        spPlannerRallyTime.adapter = rallyAdapter
+        spPlannerRallyTime.setSelection(2) // Default to 5 Min (index 2)
+
+        // Spinner listeners to build sequential delay list reactively
+        spPlannerTeam.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                rebuildPlannerPlayerOffsets()
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+
+        spPlannerTarget.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                rebuildPlannerPlayerOffsets()
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+
+        btnPlannerSetLanding.setOnClickListener {
+            val targetName = spPlannerTarget.selectedItem?.toString() ?: "Castle"
+            val teamName = spPlannerTeam.selectedItem?.toString() ?: ""
+            val landingTimeStr = etPlannerLandingTime.text.toString()
+            val rallyTimeText = spPlannerRallyTime.selectedItem?.toString() ?: "5 Min"
+            val rallyPrepSeconds = when (rallyTimeText) {
+                "1 Min" -> 60
+                "2 Min" -> 120
+                "5 Min" -> 300
+                "10 Min" -> 600
+                else -> 300
+            }
+
+            if (teamName.isBlank()) {
+                Toast.makeText(this, "Please select an allied team to assign", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            if (landingTimeStr.isBlank()) {
+                Toast.makeText(this, "Please enter landing time (e.g. 23:45:00)", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            val offsetsJson = org.json.JSONObject()
+            for ((pId, delaySec) in plannerPlayerOffsets) {
+                offsetsJson.put(pId, delaySec)
+            }
+
+            val payload = JSONObject()
+            payload.put("x", 20)
+            payload.put("y", 20)
+            payload.put("time", formatToHHMMSS(landingTimeStr))
+            payload.put("assignedTo", teamName)
+            payload.put("type", targetName)
+            payload.put("rallyTime", rallyPrepSeconds)
+            payload.put("playerOffsets", offsetsJson)
+
+            socket?.emit("landing:create", payload)
+            Toast.makeText(this, "Landing details broadcasted!", Toast.LENGTH_SHORT).show()
+        }
+
+        btnPlannerCancelLanding.setOnClickListener {
+            val teamName = spPlannerTeam.selectedItem?.toString() ?: ""
+            val activeLanding = landingsList.find { it.optString("assignedTo") == teamName }
+
+            if (activeLanding != null) {
+                val payload = JSONObject()
+                payload.put("landingId", activeLanding.optString("id"))
+                socket?.emit("landing:cancel", payload)
+                Toast.makeText(this, "Landing cancelled.", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "No active landing found to cancel.", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         findViewById<Button>(R.id.btnAddButton).setOnClickListener {
-            val target = findViewById<EditText>(R.id.etTargetName).text.toString()
-            if (target.isBlank()) return@setOnClickListener
+            val target = findViewById<Spinner>(R.id.spAddButtonTarget).selectedItem?.toString() ?: "Castle"
 
             val timeStr = findViewById<EditText>(R.id.etMarchTime).text.toString()
             val timeSec = if (timeStr.isNotBlank()) timeStr.toLong() else 300L
@@ -158,8 +306,32 @@ class DashboardActivity : AppCompatActivity() {
             saveButtons()
             renderActionButtons()
             updateOverlay()
+        }
 
-            findViewById<EditText>(R.id.etTargetName).setText("")
+        // --- Team Management Hub Bindings & Logic ---
+        val btnTeamTypeToggle = findViewById<Button>(R.id.btnTeamTypeToggle)
+        val btnCreateTeam = findViewById<Button>(R.id.btnCreateTeam)
+        val etNewTeamName = findViewById<EditText>(R.id.etNewTeamName)
+
+        btnTeamTypeToggle?.setOnClickListener {
+            isEnemyTeamCreation = !isEnemyTeamCreation
+            btnTeamTypeToggle.text = if (isEnemyTeamCreation) "YES" else "NO"
+            btnTeamTypeToggle.setTextColor(if (isEnemyTeamCreation) Color.RED else Color.parseColor("#EAB308"))
+        }
+
+        btnCreateTeam?.setOnClickListener {
+            val name = etNewTeamName?.text?.toString() ?: ""
+            if (name.isBlank()) {
+                Toast.makeText(this, "Please enter a team name", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            val payload = JSONObject()
+            payload.put("name", name)
+            payload.put("isEnemy", isEnemyTeamCreation)
+            socket?.emit("admin:create_team", payload)
+            Toast.makeText(this, "Creating team '$name'...", Toast.LENGTH_SHORT).show()
+            etNewTeamName?.setText("")
         }
 
         findViewById<Button>(R.id.btnLogout).setOnClickListener {
@@ -257,6 +429,7 @@ class DashboardActivity : AppCompatActivity() {
             map["utcTime"] = getUserStartTimeForTarget(target, btn.optString("customMarchTimeMs", "300000").toLong())
             map["color"] = btn.optString("color")
             map["initiatorId"] = initiatorId ?: ""
+            map["isEnemy"] = isEnemy.toString()
 
             var activeRally: JSONObject? = null
 
@@ -290,10 +463,12 @@ class DashboardActivity : AppCompatActivity() {
                 map["isBlinking"] = "true"
                 map["action"] = "cancel"
                 map["activeRallyId"] = activeRally.optString("id")
+                map["rallyEndTime"] = activeRally.optLong("endTime").toString()
             } else {
                 map["isBlinking"] = "false"
                 map["action"] = "start"
                 map["activeRallyId"] = ""
+                map["rallyEndTime"] = ""
             }
 
             serviceList.add(map)
@@ -317,8 +492,16 @@ class DashboardActivity : AppCompatActivity() {
             socket?.on("init_state") { args ->
                 val data = args[0] as JSONObject
                 runOnUiThread {
+                    if (data.has("players")) parsePlayers(data.getJSONArray("players"))
                     if (data.has("teams")) parseTeams(data.getJSONArray("teams"))
                     if (data.has("rallies")) parseRallies(data.getJSONArray("rallies"))
+                    if (data.has("landings")) parseLandings(data.getJSONArray("landings"))
+                }
+            }
+            socket?.on("map:update") { args ->
+                val data = args[0] as JSONObject
+                runOnUiThread {
+                    if (data.has("players")) parsePlayers(data.getJSONArray("players"))
                 }
             }
             socket?.on("rally:update") { args ->
@@ -331,6 +514,12 @@ class DashboardActivity : AppCompatActivity() {
                 val data = args[0] as JSONObject
                 runOnUiThread {
                     if (data.has("teams")) parseTeams(data.getJSONArray("teams"))
+                }
+            }
+            socket?.on("landing:update") { args ->
+                val data = args[0] as JSONObject
+                runOnUiThread {
+                    if (data.has("landings")) parseLandings(data.getJSONArray("landings"))
                 }
             }
 
@@ -414,6 +603,262 @@ class DashboardActivity : AppCompatActivity() {
         renderTeams()
         updateOverlay()
         renderActionButtons()
+        runOnUiThread {
+            refreshCommanderPlannerUI()
+            refreshTeamManagementUI()
+        }
+    }
+
+    private fun parseLandings(array: JSONArray) {
+        landingsList.clear()
+        for (i in 0 until array.length()) {
+            landingsList.add(array.getJSONObject(i))
+        }
+        updateOverlay()
+        runOnUiThread {
+            refreshCommanderPlannerUI()
+        }
+    }
+
+    private fun parsePlayers(array: JSONArray) {
+        playersList.clear()
+        for (i in 0 until array.length()) {
+            playersList.add(array.getJSONObject(i))
+        }
+        runOnUiThread {
+            refreshTeamManagementUI()
+        }
+    }
+
+    private fun refreshTeamManagementUI() {
+        val prefs = getSharedPreferences("CompanionAppPrefs", Context.MODE_PRIVATE)
+        val userRole = prefs.getString("userRole", "USER")
+        val isPrivileged = userRole == "SUPERADMIN" || userRole == "ADMIN" || userRole == "COMMANDER"
+
+        val cardTeamManagement = findViewById<View>(R.id.cardTeamManagement) ?: return
+        val cardCommanderPlanner = findViewById<View>(R.id.cardCommanderPlanner) ?: return
+
+        if (!isPrivileged) {
+            cardTeamManagement.visibility = View.GONE
+            cardCommanderPlanner.visibility = View.GONE
+            return
+        }
+
+        cardTeamManagement.visibility = View.VISIBLE
+        cardCommanderPlanner.visibility = View.VISIBLE
+
+        val container = findViewById<LinearLayout>(R.id.llTeamManagementList) ?: return
+        container.removeAllViews()
+
+        if (teamsList.isEmpty()) {
+            val tvEmpty = TextView(this)
+            tvEmpty.text = "No teams configured. Create one above!"
+            tvEmpty.setTextColor(Color.GRAY)
+            tvEmpty.textSize = 12f
+            container.addView(tvEmpty)
+            return
+        }
+
+        // List all teams
+        for (t in 0 until teamsList.size) {
+            val team = teamsList[t]
+            val teamId = team.optString("id")
+            val teamName = team.optString("name")
+            val isEnemy = team.optBoolean("isEnemy", false)
+
+            val teamCard = LinearLayout(this)
+            teamCard.orientation = LinearLayout.VERTICAL
+            teamCard.setBackgroundColor(Color.parseColor("#262626"))
+            teamCard.setPadding(20, 20, 20, 20)
+            val cardParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            cardParams.setMargins(0, 0, 0, 24)
+            teamCard.layoutParams = cardParams
+
+            // Header Layout (Team Name, Type, and Delete Button)
+            val headerLayout = LinearLayout(this)
+            headerLayout.orientation = LinearLayout.HORIZONTAL
+            headerLayout.gravity = android.view.Gravity.CENTER_VERTICAL
+            val headerParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            headerParams.setMargins(0, 0, 0, 16)
+            headerLayout.layoutParams = headerParams
+
+            val tvTitle = TextView(this)
+            tvTitle.text = teamName
+            tvTitle.setTextColor(Color.WHITE)
+            tvTitle.textSize = 15f
+            tvTitle.typeface = android.graphics.Typeface.DEFAULT_BOLD
+            val titleParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            tvTitle.layoutParams = titleParams
+
+            val tvType = TextView(this)
+            tvType.text = if (isEnemy) "ENEMY " else "ALLIED "
+            tvType.setTextColor(if (isEnemy) Color.RED else Color.GREEN)
+            tvType.textSize = 10f
+            tvType.typeface = android.graphics.Typeface.MONOSPACE
+
+            val btnDelete = Button(this)
+            btnDelete.text = "X"
+            btnDelete.setBackgroundColor(Color.parseColor("#CF6679"))
+            btnDelete.setTextColor(Color.WHITE)
+            val deleteParams = LinearLayout.LayoutParams((36 * resources.displayMetrics.density + 0.5f).toInt(), (32 * resources.displayMetrics.density + 0.5f).toInt())
+            btnDelete.layoutParams = deleteParams
+            btnDelete.textSize = 10f
+            btnDelete.setPadding(0, 0, 0, 0)
+            btnDelete.setOnClickListener {
+                val payload = JSONObject()
+                payload.put("teamId", teamId)
+                socket?.emit("admin:delete_team", payload)
+                Toast.makeText(this, "Team '$teamName' deletion broadcasted.", Toast.LENGTH_SHORT).show()
+            }
+
+            headerLayout.addView(tvTitle)
+            headerLayout.addView(tvType)
+            headerLayout.addView(btnDelete)
+            teamCard.addView(headerLayout)
+
+            // Players list sub-header
+            val tvPlayersHeader = TextView(this)
+            tvPlayersHeader.text = "PLAYERS IN TEAM:"
+            tvPlayersHeader.setTextColor(Color.parseColor("#808080"))
+            tvPlayersHeader.textSize = 11f
+            tvPlayersHeader.setPadding(0, 0, 0, 8)
+            teamCard.addView(tvPlayersHeader)
+
+            // Dynamic Players list inside the team card
+            val playersArray = team.optJSONArray("players")
+            if (playersArray != null && playersArray.length() > 0) {
+                for (p in 0 until playersArray.length()) {
+                    val pObj = playersArray.getJSONObject(p)
+                    val pId = pObj.optString("id")
+                    val pName = pObj.optString("name")
+
+                    val playerRow = LinearLayout(this)
+                    playerRow.orientation = LinearLayout.HORIZONTAL
+                    playerRow.gravity = android.view.Gravity.CENTER_VERTICAL
+                    val rowParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                    rowParams.setMargins(0, 0, 0, 8)
+                    playerRow.layoutParams = rowParams
+
+                    val tvPlayerName = TextView(this)
+                    tvPlayerName.text = pName
+                    tvPlayerName.setTextColor(Color.parseColor("#E0E0E0"))
+                    tvPlayerName.textSize = 13f
+                    val pNameParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    tvPlayerName.layoutParams = pNameParams
+
+                    val btnRemovePlayer = Button(this)
+                    btnRemovePlayer.text = "Remove"
+                    btnRemovePlayer.setBackgroundColor(Color.DKGRAY)
+                    btnRemovePlayer.setTextColor(Color.WHITE)
+                    val removeParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, (30 * resources.displayMetrics.density + 0.5f).toInt())
+                    btnRemovePlayer.layoutParams = removeParams
+                    btnRemovePlayer.textSize = 9f
+                    btnRemovePlayer.setPadding(10, 0, 10, 0)
+                    btnRemovePlayer.setOnClickListener {
+                        val payload = JSONObject()
+                        payload.put("playerId", pId)
+                        payload.put("teamId", JSONObject.NULL) // Unassign player
+                        socket?.emit("admin:assign_player_to_team", payload)
+                        Toast.makeText(this, "Removing $pName from team...", Toast.LENGTH_SHORT).show()
+                    }
+
+                    playerRow.addView(tvPlayerName)
+                    playerRow.addView(btnRemovePlayer)
+                    teamCard.addView(playerRow)
+                }
+            } else {
+                val tvNoPlayers = TextView(this)
+                tvNoPlayers.text = "No players assigned."
+                tvNoPlayers.setTextColor(Color.parseColor("#555555"))
+                tvNoPlayers.textSize = 12f
+                tvNoPlayers.setPadding(0, 0, 0, 12)
+                teamCard.addView(tvNoPlayers)
+            }
+
+            // Assign Player Section inside team card
+            val assignLayout = LinearLayout(this)
+            assignLayout.orientation = LinearLayout.HORIZONTAL
+            assignLayout.gravity = android.view.Gravity.CENTER_VERTICAL
+            val assignParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            assignParams.setMargins(0, 12, 0, 0)
+            assignLayout.layoutParams = assignParams
+
+            val unassignedPlayersNames = mutableListOf<String>()
+            val unassignedPlayersIds = mutableListOf<String>()
+            
+            unassignedPlayersNames.add("-- Select Player --")
+            unassignedPlayersIds.add("")
+
+            for (playerObj in playersList) {
+                val pId = playerObj.optString("id")
+                val pName = playerObj.optString("name")
+                val pTeamId = playerObj.optString("teamId", "")
+
+                if (pTeamId != teamId) {
+                    unassignedPlayersNames.add(pName)
+                    unassignedPlayersIds.add(pId)
+                }
+            }
+
+            val spinner = Spinner(this)
+            val spinnerParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            spinner.layoutParams = spinnerParams
+            spinner.background = getDrawable(android.R.drawable.btn_dropdown)
+            val assignAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, unassignedPlayersNames)
+            assignAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            spinner.adapter = assignAdapter
+
+            val btnAssign = Button(this)
+            btnAssign.text = "Assign"
+            btnAssign.setBackgroundColor(Color.parseColor("#EAB308"))
+            btnAssign.setTextColor(Color.BLACK)
+            val assignBtnParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, (36 * resources.displayMetrics.density + 0.5f).toInt())
+            assignBtnParams.setMargins(10, 0, 0, 0)
+            btnAssign.layoutParams = assignBtnParams
+            btnAssign.textSize = 11f
+            btnAssign.setPadding(15, 0, 15, 0)
+            btnAssign.setOnClickListener {
+                val selectedPos = spinner.selectedItemPosition
+                if (selectedPos > 0) {
+                    val pIdToAssign = unassignedPlayersIds[selectedPos]
+                    val pNameToAssign = unassignedPlayersNames[selectedPos]
+                    val payload = JSONObject()
+                    payload.put("playerId", pIdToAssign)
+                    payload.put("teamId", teamId)
+                    socket?.emit("admin:assign_player_to_team", payload)
+                    Toast.makeText(this, "Assigning $pNameToAssign to $teamName...", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this, "Please select a player to assign", Toast.LENGTH_SHORT).show()
+                }
+            }
+
+            assignLayout.addView(spinner)
+            assignLayout.addView(btnAssign)
+            teamCard.addView(assignLayout)
+
+            container.addView(teamCard)
+        }
+    }
+
+    private fun refreshCommanderPlannerUI() {
+        val spPlannerTeam = findViewById<Spinner>(R.id.spPlannerTeam) ?: return
+        val btnPlannerCancelLanding = findViewById<Button>(R.id.btnPlannerCancelLanding) ?: return
+        
+        val alliedTeamNames = teamsList.filter { !it.optBoolean("isEnemy", false) }.map { it.optString("name") }
+        val currentSelectedTeam = spPlannerTeam.selectedItem?.toString() ?: ""
+        
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, alliedTeamNames)
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        spPlannerTeam.adapter = adapter
+        
+        if (currentSelectedTeam.isNotBlank()) {
+            val restoreIndex = alliedTeamNames.indexOf(currentSelectedTeam)
+            if (restoreIndex != -1) {
+                spPlannerTeam.setSelection(restoreIndex)
+            }
+        }
+        
+        rebuildPlannerPlayerOffsets()
     }
 
 
@@ -624,8 +1069,15 @@ class DashboardActivity : AppCompatActivity() {
                     }
 
                     if (date != null) {
+                        val rallyTimeSeconds = allyTeam.optLong("rallyTime", 300L)
+                        val playerOffsetsObj = allyTeam.optJSONObject("playerOffsets")
+                        val playerOffsetSeconds = playerOffsetsObj?.optLong(playerId, 0L) ?: 0L
+
                         val finalMarchTimeMs = if (exactMarchTimeSeconds != null) exactMarchTimeSeconds!! * 1000L else fallbackMarchTimeMs
-                        val startTimeMs = date.time - finalMarchTimeMs - 300000L // - 5 mins
+                        val rallyTimeMs = rallyTimeSeconds * 1000L
+                        val playerOffsetMs = playerOffsetSeconds * 1000L
+
+                        val startTimeMs = date.time + playerOffsetMs - finalMarchTimeMs - rallyTimeMs
                         val startFormat = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
                         startFormat.timeZone = java.util.TimeZone.getTimeZone("UTC")
                         return startFormat.format(java.util.Date(startTimeMs)) + " UTC"
@@ -718,6 +1170,15 @@ class DashboardActivity : AppCompatActivity() {
                     if (assignedInitiator.isNullOrBlank() || assignedInitiator == "null") {
                         Toast.makeText(this, "No initiator configured. Please claim a player profile on the web hub first.", Toast.LENGTH_SHORT).show()
                     } else {
+                        // Block duplicate active rallies
+                        val initiatorActiveRally = ralliesList.find { r ->
+                            r.optString("initiatorId") == assignedInitiator
+                        }
+                        if (initiatorActiveRally != null) {
+                            Toast.makeText(this, "You already have an active rally on ${initiatorActiveRally.optString("target")}!", Toast.LENGTH_SHORT).show()
+                            return@setOnClickListener
+                        }
+
                         val payload = JSONObject()
                         payload.put("initiatorId", assignedInitiator)
                         payload.put("target", target)
@@ -781,6 +1242,229 @@ class DashboardActivity : AppCompatActivity() {
         stopService(intent)
         startActivity(Intent(this, MainActivity::class.java))
         finish()
+    }
+
+    private fun formatToHHMMSS(timeStr: String): String {
+        val clean = timeStr.replace(":", "")
+        if (clean.length == 6) {
+            return "${clean.substring(0, 2)}:${clean.substring(2, 4)}:${clean.substring(4, 6)}"
+        }
+        return timeStr
+    }
+
+    private fun getPlayerMarchTimeForTarget(playerObj: JSONObject, targetName: String): Long {
+        val t = targetName.lowercase().replace(" ", "_")
+        return when {
+            t.contains("castle") -> playerObj.optLong("mtCastle", 0L)
+            t.contains("north") -> playerObj.optLong("mtNorth", 0L)
+            t.contains("east") -> playerObj.optLong("mtEast", 0L)
+            t.contains("south") -> playerObj.optLong("mtSouth", 0L)
+            t.contains("west") -> playerObj.optLong("mtWest", 0L)
+            else -> {
+                try {
+                    val customStr = playerObj.optString("customMarchTimes", "{}")
+                    val customObj = JSONObject(customStr)
+                    customObj.optLong(t, 0L)
+                } catch (e: Exception) {
+                    0L
+                }
+            }
+        }
+    }
+
+    private fun updatePlayerMarchTime(playerId: String, playerObj: JSONObject, targetName: String, newMarchSec: Long) {
+        val t = targetName.lowercase().replace(" ", "_")
+        
+        var mtCastle = playerObj.optLong("mtCastle", 0L)
+        var mtNorth = playerObj.optLong("mtNorth", 0L)
+        var mtEast = playerObj.optLong("mtEast", 0L)
+        var mtSouth = playerObj.optLong("mtSouth", 0L)
+        var mtWest = playerObj.optLong("mtWest", 0L)
+        
+        val customMarchTimesObj = try {
+            val customStr = playerObj.optString("customMarchTimes", "{}")
+            JSONObject(customStr)
+        } catch (e: Exception) {
+            JSONObject()
+        }
+        
+        if (t.contains("castle")) mtCastle = newMarchSec
+        else if (t.contains("north")) mtNorth = newMarchSec
+        else if (t.contains("east")) mtEast = newMarchSec
+        else if (t.contains("south")) mtSouth = newMarchSec
+        else if (t.contains("west")) mtWest = newMarchSec
+        else {
+            customMarchTimesObj.put(t, newMarchSec)
+        }
+        
+        val payload = JSONObject()
+        payload.put("playerId", playerId)
+        payload.put("mtCastle", mtCastle)
+        payload.put("mtNorth", mtNorth)
+        payload.put("mtEast", mtEast)
+        payload.put("mtSouth", mtSouth)
+        payload.put("mtWest", mtWest)
+        payload.put("customMarchTimes", customMarchTimesObj)
+        
+        socket?.emit("player:update_march_times", payload)
+    }
+
+    private fun rebuildPlannerPlayerOffsets() {
+        val spPlannerTeam = findViewById<Spinner>(R.id.spPlannerTeam) ?: return
+        val spPlannerTarget = findViewById<Spinner>(R.id.spPlannerTarget) ?: return
+        val tvPlannerOffsetsTitle = findViewById<TextView>(R.id.tvPlannerOffsetsTitle) ?: return
+        val llPlannerPlayerOffsets = findViewById<LinearLayout>(R.id.llPlannerPlayerOffsets) ?: return
+        val etPlannerLandingTime = findViewById<EditText>(R.id.etPlannerLandingTime) ?: return
+        val btnPlannerCancelLanding = findViewById<Button>(R.id.btnPlannerCancelLanding) ?: return
+        val spPlannerRallyTime = findViewById<Spinner>(R.id.spPlannerRallyTime) ?: return
+
+        val selectedTeamName = spPlannerTeam.selectedItem?.toString() ?: ""
+        val selectedTeam = teamsList.find { !it.optBoolean("isEnemy", false) && it.optString("name") == selectedTeamName }
+
+        llPlannerPlayerOffsets.removeAllViews()
+        plannerPlayerOffsets.clear()
+
+        if (selectedTeam != null) {
+            val players = selectedTeam.optJSONArray("players")
+            if (players != null && players.length() > 0) {
+                tvPlannerOffsetsTitle.visibility = View.VISIBLE
+                llPlannerPlayerOffsets.visibility = View.VISIBLE
+
+                val existingOffsets = selectedTeam.optJSONObject("playerOffsets")
+                val targetName = spPlannerTarget.selectedItem?.toString() ?: "Castle"
+
+                for (p in 0 until players.length()) {
+                    val playerObj = players.getJSONObject(p)
+                    val pId = playerObj.optString("id")
+                    val pName = playerObj.optString("name")
+
+                    val row = LinearLayout(this)
+                    row.orientation = LinearLayout.HORIZONTAL
+                    row.gravity = android.view.Gravity.CENTER_VERTICAL
+                    val rowParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                    rowParams.setMargins(0, 0, 0, 15)
+                    row.layoutParams = rowParams
+
+                    val tvName = TextView(this)
+                    val lpName = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+                    tvName.layoutParams = lpName
+                    tvName.text = pName
+                    tvName.setTextColor(Color.WHITE)
+                    tvName.textSize = 13f
+
+                    val tvMarchLabel = TextView(this)
+                    tvMarchLabel.text = " March:"
+                    tvMarchLabel.setTextColor(Color.GRAY)
+                    tvMarchLabel.textSize = 11f
+
+                    val etMarch = EditText(this)
+                    val lpMarch = LinearLayout.LayoutParams((45 * resources.displayMetrics.density + 0.5f).toInt(), LinearLayout.LayoutParams.WRAP_CONTENT)
+                    etMarch.layoutParams = lpMarch
+                    etMarch.inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                    etMarch.gravity = android.view.Gravity.CENTER
+                    etMarch.setTextColor(Color.CYAN)
+                    etMarch.textSize = 12f
+                    etMarch.typeface = android.graphics.Typeface.MONOSPACE
+
+                    val currentMarchVal = getPlayerMarchTimeForTarget(playerObj, targetName)
+                    if (currentMarchVal > 0) {
+                        etMarch.setText(currentMarchVal.toString())
+                    } else {
+                        etMarch.setHint("--")
+                    }
+
+                    etMarch.addTextChangedListener(object : android.text.TextWatcher {
+                        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                            val valLong = if (s.isNullOrBlank()) 0L else s.toString().toLongOrNull() ?: 0L
+                            updatePlayerMarchTime(pId, playerObj, targetName, valLong)
+                        }
+                        override fun afterTextChanged(s: android.text.Editable?) {}
+                    })
+
+                    val tvMarchSuffix = TextView(this)
+                    tvMarchSuffix.text = "s |"
+                    tvMarchSuffix.setTextColor(Color.CYAN)
+                    tvMarchSuffix.textSize = 11f
+
+                    val tvLabel = TextView(this)
+                    tvLabel.text = " Delay:"
+                    tvLabel.setTextColor(Color.GRAY)
+                    tvLabel.textSize = 11f
+
+                    val etDelay = EditText(this)
+                    val lpDelay = LinearLayout.LayoutParams((45 * resources.displayMetrics.density + 0.5f).toInt(), LinearLayout.LayoutParams.WRAP_CONTENT)
+                    etDelay.layoutParams = lpDelay
+                    etDelay.inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                    etDelay.gravity = android.view.Gravity.CENTER
+                    etDelay.setTextColor(Color.YELLOW)
+                    etDelay.textSize = 12f
+                    etDelay.typeface = android.graphics.Typeface.MONOSPACE
+
+                    val savedVal = existingOffsets?.optLong(pId, 0L) ?: 0L
+                    if (savedVal > 0) {
+                        etDelay.setText(savedVal.toString())
+                        plannerPlayerOffsets[pId] = savedVal
+                    } else {
+                        etDelay.setHint("+0s")
+                        plannerPlayerOffsets[pId] = 0L
+                    }
+
+                    etDelay.addTextChangedListener(object : android.text.TextWatcher {
+                        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                            val valLong = if (s.isNullOrBlank()) 0L else s.toString().toLongOrNull() ?: 0L
+                            plannerPlayerOffsets[pId] = valLong
+                        }
+                        override fun afterTextChanged(s: android.text.Editable?) {}
+                    })
+
+                    val tvSuffix = TextView(this)
+                    tvSuffix.text = "s"
+                    tvSuffix.setTextColor(Color.YELLOW)
+                    tvSuffix.textSize = 11f
+
+                    row.addView(tvName)
+                    row.addView(tvMarchLabel)
+                    row.addView(etMarch)
+                    row.addView(tvMarchSuffix)
+                    row.addView(tvLabel)
+                    row.addView(etDelay)
+                    row.addView(tvSuffix)
+                    llPlannerPlayerOffsets.addView(row)
+                }
+
+                // Pre-populate landing details
+                val landingTarget = selectedTeam.optString("selectedTarget")
+                val landingTime = selectedTeam.optString("landingTime")
+                val rallyTimeSec = selectedTeam.optLong("rallyTime", 300L)
+
+                if (landingTime.isNotBlank()) {
+                    etPlannerLandingTime.setText(formatToHHMMSS(landingTime))
+                    btnPlannerCancelLanding.visibility = View.VISIBLE
+
+                    val targetIndex = targets.indexOfFirst { it.equals(landingTarget, ignoreCase = true) }
+                    if (targetIndex != -1) {
+                        spPlannerTarget.setSelection(targetIndex)
+                    }
+
+                    val rallyIndex = when (rallyTimeSec) {
+                        60L -> 0
+                        120L -> 1
+                        300L -> 2
+                        600L -> 3
+                        else -> 2
+                    }
+                    spPlannerRallyTime.setSelection(rallyIndex)
+                } else {
+                    etPlannerLandingTime.setText("")
+                    btnPlannerCancelLanding.visibility = View.GONE
+                }
+            } else {
+                tvPlannerOffsetsTitle.visibility = View.GONE
+                llPlannerPlayerOffsets.visibility = View.GONE
+            }
+        }
     }
 
     override fun onDestroy() {

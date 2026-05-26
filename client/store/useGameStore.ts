@@ -56,6 +56,10 @@ export interface Team {
   name: string;
   isEnemy: boolean;
   players: Player[];
+  selectedTarget?: string;
+  landingTime?: string;
+  rallyTime?: number;
+  playerOffsets?: Record<string, number>;
 }
 
 export interface MapElement {
@@ -85,6 +89,9 @@ export interface Landing {
   y: number;
   time: string;
   assignedTo: string;
+  type?: string;
+  rallyTime?: number;
+  playerOffsets?: Record<string, number>;
 }
 
 interface GameState {
@@ -127,7 +134,7 @@ interface GameState {
   selectTarget: (x: number, y: number) => void;
   setSelectedPlayerId: (id: string | null) => void;
   selectBuilding: (building: string | null) => void;
-  createLanding: (x: number, y: number, time: string, assignedTo: string, type?: string) => void;
+  createLanding: (x: number, y: number, time: string, assignedTo: string, type?: string, rallyTime?: number, playerOffsets?: Record<string, number>) => void;
   cancelLanding: (id: string) => void;
   setTickerMsg: (msg: string) => void;
   sendAlert: (msg: string) => void;
@@ -369,10 +376,10 @@ export const useGameStore = create<GameState>((set, get) => ({
     set({ selectedBuilding: building });
   },
 
-  createLanding: (x: number, y: number, time: string, assignedTo: string, type?: string) => {
+  createLanding: (x: number, y: number, time: string, assignedTo: string, type?: string, rallyTime?: number, playerOffsets?: Record<string, number>) => {
     const { socket } = get();
     if (socket) {
-      socket.emit('landing:create', { x, y, time, assignedTo, type });
+      socket.emit('landing:create', { x, y, time, assignedTo, type, rallyTime, playerOffsets });
     }
   },
 

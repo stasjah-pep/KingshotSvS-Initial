@@ -70,10 +70,14 @@ class MainActivity : AppCompatActivity() {
                             val sessionToken = respJson.getString("token")
                             val userObj = respJson.getJSONObject("user")
                             val pId = userObj.optString("playerId", null)
+                            val userRole = userObj.optString("role", "USER")
+                            val username = userObj.optString("username", "")
 
                             prefs.edit().apply {
                                 putString("serverUrl", url)
                                 putString("sessionToken", sessionToken)
+                                putString("userRole", userRole)
+                                putString("username", username)
                                 if (pId != null && pId != "null") {
                                     putString("playerId", pId)
                                 } else {

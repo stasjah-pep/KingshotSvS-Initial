@@ -207,6 +207,26 @@ class FloatingOverlayService : Service() {
         val customMarchTimeMs = btnMap["customMarchTimeMs"] ?: "300000"
         val shortTarget = if (target.length > 5) target.substring(0, 5) else target
         
+        val isEnemy = btnMap["isEnemy"]?.toBoolean() ?: false
+        val rallyEndTimeStr = btnMap["rallyEndTime"] ?: ""
+
+        if (rallyEndTimeStr.isNotEmpty() && rallyEndTimeStr != "null") {
+            try {
+                val endTimeMs = rallyEndTimeStr.toLong()
+                val now = System.currentTimeMillis()
+                val diffMs = endTimeMs - now
+                if (diffMs > 0) {
+                    val diffSec = diffMs / 1000
+                    if (isEnemy) {
+                        button.text = "$shortTarget\nENEM ${diffSec}s"
+                    } else {
+                        button.text = "$shortTarget\nALLY ${diffSec}s"
+                    }
+                    return
+                }
+            } catch (e: Exception) {}
+        }
+
         val utcTimeString = btnMap["utcTime"] ?: "" // Format: "HH:mm:ss UTC"
         
         if (utcTimeString.isNotEmpty() && utcTimeString != "null") {

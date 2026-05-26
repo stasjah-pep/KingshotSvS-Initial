@@ -35,7 +35,7 @@ export default function LoginPage() {
             localStorage.setItem('session_token', result.token);
         }
 
-        if (result.user.role === 'SUPERADMIN') {
+        if (result.user.role === 'SUPERADMIN' || result.user.isVerified) {
           router.push('/');
         } else {
           router.push('/otp');

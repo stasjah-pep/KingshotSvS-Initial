@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useGameStore, Player } from '../store/useGameStore';
-import { Shield, Sword, Activity, Settings, VolumeX, Volume2, Megaphone } from 'lucide-react';
+import { Shield, Sword, Activity, Settings, VolumeX, Volume2, Megaphone, ChevronLeft, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import TopBar from './TopBar';
@@ -93,6 +93,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [authorized, setAuthorized] = useState(false);
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(288);
   const [rightSidebarWidth, setRightSidebarWidth] = useState(288);
+  const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
+  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
 
   const handleLeftResize = (e: React.MouseEvent) => {
     // Only resize if primary button is held
@@ -257,15 +260,23 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 </div>
               </div>
             )}
-            <button
-              onClick={() => {
-                localStorage.removeItem('user');
-                window.location.href = '/login';
-              }}
-              className="hover:text-red-400 transition-colors"
-            >
-              LOGOUT
-            </button>
+            {user ? (
+              <button
+                onClick={() => {
+                  localStorage.removeItem('user');
+                  localStorage.removeItem('session_token');
+                  useGameStore.setState({ user: null });
+                  window.location.href = '/login';
+                }}
+                className="hover:text-red-400 transition-colors"
+              >
+                LOGOUT
+              </button>
+            ) : (
+              <Link href="/login" className="hover:text-accent transition-colors">
+                LOGIN
+              </Link>
+            )}
           </nav>
 
           {/* Status Indicator */}
@@ -278,51 +289,70 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
+      {/* Full-width Tactical Controls & Landing Scheduler */}
+      <TopBar />
+
       {/* Main Layout */}
       <div className="flex flex-1 overflow-hidden relative" onMouseUp={() => { /* Stop dragging could happen globally but mousemove handles it cleanly via e.buttons check */ }}>
         {/* Left Sidebar (Enemies) */}
         <aside
-          style={{ width: leftSidebarWidth }}
-          className="flex-none border-r border-[var(--grid)] bg-[var(--primary)] flex flex-col z-10 shadow-xl relative"
+          style={{ width: leftSidebarCollapsed ? 0 : leftSidebarWidth }}
+          className={`flex-none border-r border-[var(--grid)] bg-[var(--primary)] flex flex-col z-10 shadow-xl relative overflow-hidden ${
+            leftSidebarCollapsed ? 'border-r-0' : ''
+          } ${!isResizing ? 'transition-all duration-300' : ''}`}
         >
-          <div className="p-3 border-b border-[var(--grid)] bg-danger/10">
+          {/* Floating Collapse/Expand Button */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setLeftSidebarCollapsed(!leftSidebarCollapsed);
+            }}
+            className="absolute top-1/2 -right-3 -translate-y-1/2 z-50 w-6 h-16 bg-black/95 border border-cyan-500/30 hover:border-cyan-400 rounded-r flex items-center justify-center cursor-pointer shadow-[0_0_15px_rgba(0,255,255,0.25)] text-cyan-400 hover:text-white transition-all select-none"
+            title={leftSidebarCollapsed ? "Expand Left Panel" : "Collapse Left Panel"}
+          >
+            {leftSidebarCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+          </button>
+
+          <div className="p-3 border-b border-[var(--grid)] bg-danger/10 min-w-[200px]">
             <h2 className="text-sm font-bold text-danger tracking-widest flex items-center gap-2">
               <Sword className="w-4 h-4" /> ENEMY FORCES ({enemies.length})
             </h2>
           </div>
-          <div className="flex-1 overflow-y-auto p-3 scrollbar-thin">
+          <div className="flex-1 overflow-y-auto p-3 scrollbar-thin min-w-[200px]">
             {enemies.map(p => (
               <PlayerCard key={p.id} player={p} isEnemy={true} />
             ))}
           </div>
           {/* Resizer Handle */}
-          <div
-            className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-cyan-500/50 z-50"
-            onMouseMove={(e) => {
-                // If parent has mousemove, we might not need it here, but usually we attach move to window or a larger container
-            }}
-            onMouseDown={(e) => {
-               e.preventDefault();
-               const moveHandler = (moveEvent: MouseEvent) => {
-                   if (moveEvent.buttons !== 1) {
-                       window.removeEventListener('mousemove', moveHandler);
-                       return;
-                   }
-                   const newWidth = moveEvent.clientX;
-                   if (newWidth > 150 && newWidth < 600) {
-                     setLeftSidebarWidth(newWidth);
-                   }
-               };
-               window.addEventListener('mousemove', moveHandler);
-               window.addEventListener('mouseup', () => window.removeEventListener('mousemove', moveHandler), { once: true });
-            }}
-          />
+          {!leftSidebarCollapsed && (
+            <div
+              className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-cyan-500/50 z-50"
+              onMouseDown={(e) => {
+                 e.preventDefault();
+                 setIsResizing(true);
+                 const moveHandler = (moveEvent: MouseEvent) => {
+                     if (moveEvent.buttons !== 1) {
+                         window.removeEventListener('mousemove', moveHandler);
+                         setIsResizing(false);
+                         return;
+                     }
+                     const newWidth = moveEvent.clientX;
+                     if (newWidth > 150 && newWidth < 600) {
+                       setLeftSidebarWidth(newWidth);
+                     }
+                 };
+                 window.addEventListener('mousemove', moveHandler);
+                 window.addEventListener('mouseup', () => {
+                     window.removeEventListener('mousemove', moveHandler);
+                     setIsResizing(false);
+                 }, { once: true });
+              }}
+            />
+          )}
         </aside>
 
         {/* Center Content (Map) */}
         <main className="flex-1 relative bg-[radial-gradient(circle_at_center,_#2c1221_0%,_#1a0b14_100%)] overflow-hidden flex flex-col">
-          {/* Top Bar Overlay or Integrated */}
-          <TopBar />
           <div className="flex-1 relative overflow-hidden">
              {children}
           </div>
@@ -330,39 +360,59 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
         {/* Right Sidebar (Allies) */}
         <aside
-          style={{ width: rightSidebarWidth }}
-          className="flex-none border-l border-[var(--grid)] bg-[var(--primary)] flex flex-col z-10 shadow-xl relative"
+          style={{ width: rightSidebarCollapsed ? 0 : rightSidebarWidth }}
+          className={`flex-none border-l border-[var(--grid)] bg-[var(--primary)] flex flex-col z-10 shadow-xl relative overflow-hidden ${
+            rightSidebarCollapsed ? 'border-l-0' : ''
+          } ${!isResizing ? 'transition-all duration-300' : ''}`}
         >
-           {/* Resizer Handle (Left side of this sidebar) */}
-           <div
-            className="absolute top-0 left-0 w-1 h-full cursor-col-resize hover:bg-cyan-500/50 z-50"
-            onMouseDown={(e) => {
-               e.preventDefault();
-               const moveHandler = (moveEvent: MouseEvent) => {
-                   if (moveEvent.buttons !== 1) {
-                       window.removeEventListener('mousemove', moveHandler);
-                       return;
-                   }
-                   const newWidth = window.innerWidth - moveEvent.clientX;
-                   if (newWidth > 150 && newWidth < 600) {
-                     setRightSidebarWidth(newWidth);
-                   }
-               };
-               window.addEventListener('mousemove', moveHandler);
-               window.addEventListener('mouseup', () => window.removeEventListener('mousemove', moveHandler), { once: true });
+          {/* Floating Collapse/Expand Button */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setRightSidebarCollapsed(!rightSidebarCollapsed);
             }}
-          />
+            className="absolute top-1/2 -left-3 -translate-y-1/2 z-50 w-6 h-16 bg-black/95 border border-cyan-500/30 hover:border-cyan-400 rounded-l flex items-center justify-center cursor-pointer shadow-[0_0_15px_rgba(0,255,255,0.25)] text-cyan-400 hover:text-white transition-all select-none"
+            title={rightSidebarCollapsed ? "Expand Right Panel" : "Collapse Right Panel"}
+          >
+            {rightSidebarCollapsed ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+          </button>
 
-          <div className="p-3 border-b border-[var(--grid)] bg-accent/10">
+          <div className="p-3 border-b border-[var(--grid)] bg-accent/10 min-w-[200px]">
             <h2 className="text-sm font-bold text-accent tracking-widest flex items-center gap-2">
               <Shield className="w-4 h-4" /> ALLIED FORCES ({allies.length})
             </h2>
           </div>
-          <div className="flex-1 overflow-y-auto p-3 scrollbar-thin">
+          <div className="flex-1 overflow-y-auto p-3 scrollbar-thin min-w-[200px]">
             {allies.map(p => (
               <PlayerCard key={p.id} player={p} isEnemy={false} />
             ))}
           </div>
+          {/* Resizer Handle (Left side of this sidebar) */}
+          {!rightSidebarCollapsed && (
+            <div
+              className="absolute top-0 left-0 w-1 h-full cursor-col-resize hover:bg-cyan-500/50 z-50"
+              onMouseDown={(e) => {
+                 e.preventDefault();
+                 setIsResizing(true);
+                 const moveHandler = (moveEvent: MouseEvent) => {
+                     if (moveEvent.buttons !== 1) {
+                         window.removeEventListener('mousemove', moveHandler);
+                         setIsResizing(false);
+                         return;
+                     }
+                     const newWidth = window.innerWidth - moveEvent.clientX;
+                     if (newWidth > 150 && newWidth < 600) {
+                       setRightSidebarWidth(newWidth);
+                     }
+                 };
+                 window.addEventListener('mousemove', moveHandler);
+                 window.addEventListener('mouseup', () => {
+                     window.removeEventListener('mousemove', moveHandler);
+                     setIsResizing(false);
+                 }, { once: true });
+              }}
+            />
+          )}
         </aside>
       </div>
       <PlayerModal />

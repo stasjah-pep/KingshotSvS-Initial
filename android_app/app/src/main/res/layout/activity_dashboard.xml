@@ -76,21 +76,20 @@
                         android:textStyle="bold"
                         android:layout_marginBottom="16dp" />
 
-                    <com.google.android.material.textfield.TextInputLayout
-                        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
-                        android:layout_width="match_parent"
+                    <TextView
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginBottom="12dp"
-                        android:hint="Target Name (e.g. Castle)"
-                        app:hintTextColor="#BB86FC"
-                        app:boxStrokeColor="#BB86FC">
+                        android:text="Select Target"
+                        android:textColor="#B0B0B0"
+                        android:textSize="12sp"
+                        android:layout_marginBottom="4dp" />
 
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/etTargetName"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:textColor="#FFFFFF" />
-                    </com.google.android.material.textfield.TextInputLayout>
+                    <Spinner
+                        android:id="@+id/spAddButtonTarget"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:background="@android:drawable/btn_dropdown"
+                        android:layout_marginBottom="12dp" />
 
                     <com.google.android.material.textfield.TextInputLayout
                         style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
@@ -188,6 +187,278 @@
                         app:cornerRadius="8dp"
                         android:backgroundTint="#BB86FC"
                         android:textColor="#000000" />
+
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Commander Co-Op Launch Planner Card -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardCommanderPlanner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="24dp"
+                app:cardBackgroundColor="#1F1F1F"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="4dp"
+                app:strokeColor="#3306B6D4"
+                app:strokeWidth="1.5dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Commander Launch Planner"
+                        android:textColor="#06B6D4"
+                        android:textSize="18sp"
+                        android:textStyle="bold"
+                        android:layout_marginBottom="4dp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Synchronize hits &amp; sequence delays for SVS battles."
+                        android:textColor="#B0B0B0"
+                        android:textSize="12sp"
+                        android:layout_marginBottom="16dp" />
+
+                    <!-- Target Selection Spinner -->
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Select Target Building"
+                        android:textColor="#B0B0B0"
+                        android:textSize="12sp"
+                        android:layout_marginBottom="4dp" />
+                    <Spinner
+                        android:id="@+id/spPlannerTarget"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:background="@android:drawable/btn_dropdown"
+                        android:layout_marginBottom="12dp" />
+
+                    <!-- Allied Team Spinner -->
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Assign to Allied Team"
+                        android:textColor="#B0B0B0"
+                        android:textSize="12sp"
+                        android:layout_marginBottom="4dp" />
+                    <Spinner
+                        android:id="@+id/spPlannerTeam"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:background="@android:drawable/btn_dropdown"
+                        android:layout_marginBottom="12dp" />
+
+                    <!-- Rally Duration Spinner -->
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Rally Prep Duration"
+                        android:textColor="#B0B0B0"
+                        android:textSize="12sp"
+                        android:layout_marginBottom="4dp" />
+                    <Spinner
+                        android:id="@+id/spPlannerRallyTime"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:background="@android:drawable/btn_dropdown"
+                        android:layout_marginBottom="12dp" />
+
+                    <!-- Landing Time UTC Input -->
+                    <com.google.android.material.textfield.TextInputLayout
+                        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="16dp"
+                        android:hint="Landing Hit Time (HH:mm:ss UTC)"
+                        app:hintTextColor="#06B6D4"
+                        app:boxStrokeColor="#06B6D4">
+
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/etPlannerLandingTime"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:textColor="#FFFFFF"
+                            android:fontFamily="monospace"
+                            android:singleLine="true" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <!-- Player sequential offsets container -->
+                    <TextView
+                        android:id="@+id/tvPlannerOffsetsTitle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Sequence Hit Delays"
+                        android:textColor="#B0B0B0"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:layout_marginBottom="8dp"
+                        android:visibility="gone" />
+                    <LinearLayout
+                        android:id="@+id/llPlannerPlayerOffsets"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:layout_marginBottom="16dp"
+                        android:visibility="gone" />
+
+                    <!-- Set Landing Action Buttons -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnPlannerSetLanding"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:layout_height="52dp"
+                            android:text="Broadcast Landing"
+                            app:cornerRadius="8dp"
+                            android:backgroundTint="#06B6D4"
+                            android:textColor="#000000" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnPlannerCancelLanding"
+                            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="52dp"
+                            android:layout_marginStart="8dp"
+                            android:text="Cancel"
+                            app:cornerRadius="8dp"
+                            app:strokeColor="#CF6679"
+                            android:textColor="#CF6679"
+                            android:visibility="gone" />
+                    </LinearLayout>
+
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Team Management Hub Card -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardTeamManagement"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="24dp"
+                app:cardBackgroundColor="#1F1F1F"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="4dp"
+                app:strokeColor="#33EAB308"
+                app:strokeWidth="1.5dp"
+                android:visibility="gone">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Team Management Hub"
+                        android:textColor="#EAB308"
+                        android:textSize="18sp"
+                        android:textStyle="bold"
+                        android:layout_marginBottom="4dp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Create allied/enemy teams, delete teams, and manage player team assignments."
+                        android:textColor="#B0B0B0"
+                        android:textSize="12sp"
+                        android:layout_marginBottom="16dp" />
+
+                    <!-- Create Team Sub-Section -->
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Create New Team"
+                        android:textColor="#FFFFFF"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:layout_marginBottom="8dp" />
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="12dp"
+                        android:hint="Team Name"
+                        app:hintTextColor="#EAB308"
+                        app:boxStrokeColor="#EAB308">
+
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/etNewTeamName"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:textColor="#FFFFFF"
+                            android:singleLine="true" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="16dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:layout_height="wrap_content"
+                            android:text="Is Enemy Team?"
+                            android:textColor="#B0B0B0" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnTeamTypeToggle"
+                            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="NO"
+                            app:strokeColor="#EAB308"
+                            android:textColor="#EAB308" />
+                    </LinearLayout>
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnCreateTeam"
+                        android:layout_width="match_parent"
+                        android:layout_height="52dp"
+                        android:text="Create Team"
+                        app:cornerRadius="8dp"
+                        android:backgroundTint="#EAB308"
+                        android:textColor="#000000"
+                        android:layout_marginBottom="24dp" />
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="#33FFFFFF"
+                        android:layout_marginBottom="16dp" />
+
+                    <!-- Team List Sub-Section -->
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Manage Teams &amp; Player Assignments"
+                        android:textColor="#FFFFFF"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:layout_marginBottom="12dp" />
+
+                    <LinearLayout
+                        android:id="@+id/llTeamManagementList"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical" />
 
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>

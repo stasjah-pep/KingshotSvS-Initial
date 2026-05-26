@@ -3,6 +3,7 @@ import Layout from '../components/Layout';
 import GridMap from '../components/GridMap';
 import ChatPanel from '../components/ChatPanel';
 import RallyTimers from '../components/RallyTimers';
+import PlayerHUD from '../components/PlayerHUD';
 import { useSoundEffects } from '../hooks/useSoundEffects';
 
 export default function Home() {
@@ -20,6 +21,7 @@ export default function Home() {
 
            {/* Overlays */}
            <RallyTimers />
+           <PlayerHUD />
         </div>
 
         {/* Bottom Panel (Chat) */}

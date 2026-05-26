@@ -12,7 +12,9 @@ function getTeamsWithLandings(teams, landings) {
         return {
             ...team,
             selectedTarget: teamLanding ? teamLanding.type : "",
-            landingTime: teamLanding ? teamLanding.time : ""
+            landingTime: teamLanding ? teamLanding.time : "",
+            rallyTime: teamLanding ? (teamLanding.rallyTime || 300) : 300,
+            playerOffsets: teamLanding ? (teamLanding.playerOffsets || {}) : {}
         };
     });
 }
@@ -478,6 +480,14 @@ io.on('connection', async (socket) => {
   // Rally Start
   socket.on('rally:start', async (data) => {
     const { initiatorId, target, duration, customMarchTimeMs } = data; // duration in ms
+    
+    // Enforce 1 active rally per player
+    const activeRally = RALLIES.find(r => r.initiatorId === initiatorId);
+    if (activeRally) {
+      socket.emit('error', { message: 'You already have an active rally.' });
+      return;
+    }
+
     const rallyId = Date.now().toString();
 
     let marchTime = 0;
@@ -673,14 +683,26 @@ io.on('connection', async (socket) => {
 
   // Landing Creation
   socket.on('landing:create', (data) => {
-    const { x, y, time, assignedTo, type } = data;
+    const { x, y, time, assignedTo, type, rallyTime, playerOffsets } = data;
+
+    // Defensive time format normalization (e.g. "224312" -> "22:43:12")
+    let formattedTime = time;
+    if (time && typeof time === 'string') {
+      const cleanTime = time.replace(/:/g, '');
+      if (cleanTime.length === 6) {
+        formattedTime = `${cleanTime.substring(0, 2)}:${cleanTime.substring(2, 4)}:${cleanTime.substring(4, 6)}`;
+      }
+    }
+
     const landing = {
       id: Date.now().toString(),
       x,
       y,
-      time,
+      time: formattedTime,
       assignedTo,
       type,
+      rallyTime: typeof rallyTime === 'number' ? rallyTime : 300,
+      playerOffsets: playerOffsets || {},
       creatorId: socket.id // For reference, though we aren't enforcing perms here strictly
     };
     LANDINGS.push(landing);
@@ -694,7 +716,7 @@ io.on('connection', async (socket) => {
     });
 
     io.emit('notification', {
-      message: `COMMANDER ORDER: LANDING SET AT ${time} UTC FOR ${assignedTo.toUpperCase()}`
+      message: `COMMANDER ORDER: LANDING SET AT ${formattedTime} UTC FOR ${assignedTo.toUpperCase()}`
     });
   });
 
@@ -1028,6 +1050,11 @@ io.on('connection', async (socket) => {
           const players = await prisma.player.findMany();
           io.emit('map:update', { players });
 
+          // Also broadcast updated teams so companion app gets updated player march times inside team!
+          let teams = await prisma.team.findMany({ include: { players: true } });
+          teams = getTeamsWithLandings(teams, LANDINGS);
+          io.emit('admin:teams_data', { teams });
+
       } catch (e) {
           console.error('Error updating march times:', e);
       }
@@ -1153,7 +1180,7 @@ io.on('connection', async (socket) => {
     try {
         await prisma.account.update({
             where: { id: userId },
-            data: { otp }
+            data: { otp, isVerified: false }
         });
         socket.emit('admin:otp_generated', { userId, otp });
     } catch(e) { console.error(e); }
