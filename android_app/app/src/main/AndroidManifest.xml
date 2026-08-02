@@ -31,6 +31,7 @@
         </activity>
 
         <activity android:name=".DashboardActivity" />
+        <activity android:name=".OfflineActivity" />
 
         <service
             android:name=".overlay.FloatingOverlayService"

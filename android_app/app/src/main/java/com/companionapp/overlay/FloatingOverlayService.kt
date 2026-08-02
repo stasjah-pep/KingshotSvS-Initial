@@ -31,6 +31,12 @@ class FloatingOverlayService : Service() {
                 overlayView?.let {
                     it.visibility = if (it.visibility == View.VISIBLE) View.GONE else View.VISIBLE
                 }
+            } else if (intent?.action == "com.companionapp.ACTION_OVERLAY_CLICK") {
+                val action = intent.getStringExtra("action")
+                if (action == "offline_team_click") {
+                    val teamName = intent.getStringExtra("target") ?: ""
+                    handleOfflineTeamClick(teamName)
+                }
             }
         }
     }
@@ -97,10 +103,14 @@ class FloatingOverlayService : Service() {
 
         windowManager?.addView(overlayView, params)
         handler.post(refreshRunnable)
+        val filter = android.content.IntentFilter().apply {
+            addAction("com.companionapp.ACTION_TOGGLE_OVERLAY")
+            addAction("com.companionapp.ACTION_OVERLAY_CLICK")
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(commandReceiver, android.content.IntentFilter("com.companionapp.ACTION_TOGGLE_OVERLAY"), Context.RECEIVER_NOT_EXPORTED)
+            registerReceiver(commandReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
-            registerReceiver(commandReceiver, android.content.IntentFilter("com.companionapp.ACTION_TOGGLE_OVERLAY"))
+            registerReceiver(commandReceiver, filter)
         }
 
         val dragHandle = overlayView?.findViewById<View>(R.id.dragHandle)
@@ -207,6 +217,20 @@ class FloatingOverlayService : Service() {
         val customMarchTimeMs = btnMap["customMarchTimeMs"] ?: "300000"
         val shortTarget = if (target.length > 5) target.substring(0, 5) else target
         
+        if (btnMap["action"] == "offline_team_click") {
+            val teamTarget = btnMap["teamTarget"] ?: "Castle"
+            val targetAbbr = when {
+                teamTarget.contains("castle", ignoreCase = true) -> "CSTL"
+                teamTarget.contains("north", ignoreCase = true) -> "NRTH"
+                teamTarget.contains("east", ignoreCase = true) -> "EAST"
+                teamTarget.contains("south", ignoreCase = true) -> "SOUT"
+                teamTarget.contains("west", ignoreCase = true) -> "WEST"
+                else -> "TGT"
+            }
+            button.text = "$shortTarget\n$targetAbbr"
+            return
+        }
+
         val isEnemy = btnMap["isEnemy"]?.toBoolean() ?: false
         val rallyEndTimeStr = btnMap["rallyEndTime"] ?: ""
 
@@ -285,6 +309,95 @@ class FloatingOverlayService : Service() {
         sendBroadcast(intent)
     }
 
+    private fun handleOfflineTeamClick(teamName: String) {
+        val prefs = getSharedPreferences("CompanionAppPrefs", Context.MODE_PRIVATE)
+        val teamsStr = prefs.getString("offlineTeams", "[]") ?: "[]"
+        val playersStr = prefs.getString("offlinePlayers", "[]") ?: "[]"
+
+        try {
+            val teamsArr = org.json.JSONArray(teamsStr)
+            var targetTeam: org.json.JSONObject? = null
+            for (i in 0 until teamsArr.length()) {
+                val t = teamsArr.getJSONObject(i)
+                if (t.optString("name") == teamName) {
+                    targetTeam = t
+                    break
+                }
+            }
+
+            if (targetTeam == null) return
+
+            val playersArr = org.json.JSONArray(playersStr)
+            val allPlayersMap = mutableMapOf<String, org.json.JSONObject>()
+            for (i in 0 until playersArr.length()) {
+                val p = playersArr.getJSONObject(i)
+                allPlayersMap[p.optString("id")] = p
+            }
+
+            val target = targetTeam.optString("target", "Castle")
+            val launchDelay = targetTeam.optInt("launchDelay", 10)
+            val assignedIds = targetTeam.optJSONArray("assignedPlayers") ?: org.json.JSONArray()
+            val playerOffsets = targetTeam.optJSONObject("playerOffsets") ?: org.json.JSONObject()
+
+            if (assignedIds.length() == 0) {
+                android.widget.Toast.makeText(this, "No players in team '$teamName'", android.widget.Toast.LENGTH_SHORT).show()
+                return
+            }
+
+            val mtField = when {
+                target.contains("castle", ignoreCase = true) -> "mtCastle"
+                target.contains("north", ignoreCase = true) -> "mtNorth"
+                target.contains("east", ignoreCase = true) -> "mtEast"
+                target.contains("south", ignoreCase = true) -> "mtSouth"
+                target.contains("west", ignoreCase = true) -> "mtWest"
+                else -> "mtCastle"
+            }
+
+            class OfflinePlayer(val id: String, val name: String, val marchSec: Long, val offsetSec: Int)
+            val teamPlayers = mutableListOf<OfflinePlayer>()
+
+            for (i in 0 until assignedIds.length()) {
+                val pId = assignedIds.getString(i)
+                val pObj = allPlayersMap[pId] ?: continue
+                val marchSec = pObj.optLong(mtField, 0L)
+                val offsetSec = playerOffsets.optInt(pId, 0)
+                teamPlayers.add(OfflinePlayer(pId, pObj.optString("name"), marchSec, offsetSec))
+            }
+
+            if (teamPlayers.isEmpty()) return
+
+            val firstPlayer = teamPlayers.maxByOrNull { it.marchSec - it.offsetSec } ?: teamPlayers[0]
+
+            val nowMs = System.currentTimeMillis()
+            val firstLaunchTimeMs = nowMs + (launchDelay * 1000L)
+            val firstLandTimeMs = firstLaunchTimeMs + 300000L + (firstPlayer.marchSec * 1000L)
+            val teamLandingTimeMs = firstLandTimeMs - (firstPlayer.offsetSec * 1000L)
+
+            val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
+            sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+
+            val planBuilder = StringBuilder()
+            planBuilder.append("⚔️ SVS PLAN: ${teamName.toUpperCase()} ⚔️\n")
+            planBuilder.append("🎯 Target: ${target.toUpperCase()} | Hit: ${sdf.format(java.util.Date(teamLandingTimeMs))} UTC\n")
+
+            teamPlayers.sortBy { it.offsetSec }
+
+            for ((idx, player) in teamPlayers.withIndex()) {
+                val pLaunchMs = teamLandingTimeMs + (player.offsetSec * 1000L) - (player.marchSec * 1000L) - 300000L
+                val pLaunchStr = sdf.format(java.util.Date(pLaunchMs))
+                planBuilder.append("${idx + 1}. [${player.name}] => LAUNCH: $pLaunchStr UTC (M: ${player.marchSec}s | D: +${player.offsetSec}s)\n")
+            }
+
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            val clip = android.content.ClipData.newPlainText("SVS Plan", planBuilder.toString())
+            clipboard.setPrimaryClip(clip)
+
+            android.widget.Toast.makeText(this, "Plan for '$teamName' copied to clipboard!", android.widget.Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            android.widget.Toast.makeText(this, "Calculation error: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
 
     override fun onDestroy() {
         super.onDestroy()

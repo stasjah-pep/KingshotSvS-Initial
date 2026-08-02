@@ -127,6 +127,19 @@
                         app:backgroundTint="#BB86FC"
                         app:cornerRadius="12dp" />
 
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnOfflineMode"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="60dp"
+                        android:layout_marginTop="16dp"
+                        android:text="Offline Mode (No Server)"
+                        android:textColor="#BB86FC"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        app:strokeColor="#BB86FC"
+                        app:cornerRadius="12dp" />
+
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

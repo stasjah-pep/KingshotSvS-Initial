@@ -22,6 +22,14 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         val prefs = getSharedPreferences("CompanionAppPrefs", Context.MODE_PRIVATE)
+        val isOffline = prefs.getBoolean("isOfflineMode", false)
+        if (isOffline) {
+            val intent = Intent(this, OfflineActivity::class.java)
+            startActivity(intent)
+            finish()
+            return
+        }
+
         val token = prefs.getString("sessionToken", null)
         if (token != null) {
             val intent = Intent(this, DashboardActivity::class.java)
@@ -36,9 +44,21 @@ class MainActivity : AppCompatActivity() {
         val etUsername = findViewById<EditText>(R.id.etUsername)
         val etPassword = findViewById<EditText>(R.id.etPassword)
         val btnLogin = findViewById<Button>(R.id.btnLogin)
+        val btnOfflineMode = findViewById<Button>(R.id.btnOfflineMode)
 
         val savedUrl = prefs.getString("serverUrl", "http://10.0.2.2:3001")
         etServerUrl.setText(savedUrl)
+
+        btnOfflineMode.setOnClickListener {
+            prefs.edit().apply {
+                putBoolean("isOfflineMode", true)
+                remove("sessionToken")
+                apply()
+            }
+            val intent = Intent(this@MainActivity, OfflineActivity::class.java)
+            startActivity(intent)
+            finish()
+        }
 
         btnLogin.setOnClickListener {
             val url = etServerUrl.text.toString().removeSuffix("/")
