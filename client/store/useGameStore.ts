@@ -222,7 +222,8 @@ export const useGameStore = create<GameState>((set, get) => ({
     }
 
     if (!socket) {
-        socket = io('http://localhost:3001', {
+        const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' ? `http://${window.location.hostname}:3001` : 'http://localhost:3001');
+        socket = io(socketUrl, {
             transports: ['websocket'],
             autoConnect: true,
             reconnection: true,
@@ -464,7 +465,7 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   changePassword: async (data) => {
       try {
-          const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+          const API_URL = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' ? `http://${window.location.hostname}:3001` : 'http://localhost:3001');
           const response = await fetch(`${API_URL}/api/change-password`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
