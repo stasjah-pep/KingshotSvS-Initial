@@ -1,5 +1,5 @@
 import React from 'react';
-import { useGameStore, Rally } from '../store/useGameStore';
+import { useGameStore, Rally, Landing } from '../store/useGameStore';
 
 const GRID_SIZE = 40;
 
@@ -16,13 +16,13 @@ const MarchTimeInput = ({ field, value, onChange }: { field: string, value: numb
     <input
       type="number"
       min="0"
-      max="99"
+      max="3600"
       value={localValue}
       onKeyDown={(e) => e.stopPropagation()} // Prevent external capture
       onChange={(e) => {
         let val = e.target.value;
-        // Limit to 2 digits
-        if (val.length > 2) val = val.slice(0, 2);
+        // Limit to 4 digits (far-target march times can exceed 99s)
+        if (val.length > 4) val = val.slice(0, 4);
 
         setLocalValue(val);
         if (val === '') onChange(null);
@@ -134,7 +134,7 @@ const RallyLines = () => {
                    fill="#ffffff"
                    stroke={lineColor}
                    strokeWidth="0.1rem"
-                   className="animate-pulse drop-shadow-[0_0_8px_currentColor]"
+                   className="drop-shadow-[0_0_8px_currentColor]"
                 />
              )}
           </g>
@@ -144,8 +144,73 @@ const RallyLines = () => {
   );
 };
 
+// Resolve an "HH:MM:SS" landing time to an epoch-ms target. Only rolls to tomorrow when the time
+// is more than 12h in the past, so a just-passed landing stays "passed" instead of popping back.
+const LANDING_ROLLOVER_MS = 12 * 60 * 60 * 1000;
+const landingTargetMs = (timeStr: string, nowMs: number): number | null => {
+  if (!timeStr) return null;
+  const parts = timeStr.split(':').map(Number);
+  if (parts.some((n) => Number.isNaN(n))) return null;
+  const hh = parts[0] || 0, mm = parts[1] || 0, ss = parts[2] || 0;
+  const now = new Date(nowMs);
+  const t = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hh, mm, ss));
+  if (t.getTime() < nowMs - LANDING_ROLLOVER_MS) t.setUTCDate(t.getUTCDate() + 1);
+  return t.getTime();
+};
+
+// A single landing target marker that removes itself once its hit time has passed. Kept as its
+// own component so the 1s tick doesn't re-render the whole (expensive) grid.
+const LandingMarker = ({ l, stackOffsetX, stackOffsetY }: { l: Landing; stackOffsetX: number; stackOffsetY: number }) => {
+  const { serverTimeOffset, cancelLanding } = useGameStore();
+  const [now, setNow] = React.useState(() => Date.now() - serverTimeOffset);
+
+  React.useEffect(() => {
+    const id = setInterval(() => setNow(Date.now() - serverTimeOffset), 1000);
+    return () => clearInterval(id);
+  }, [serverTimeOffset]);
+
+  const targetMs = landingTargetMs(l.time, now);
+  if (targetMs !== null && now > targetMs) return null; // hit time passed → hide marker
+
+  return (
+    <div
+      className="absolute z-20 flex flex-col items-center pointer-events-auto transition-transform"
+      style={{
+        left: `${l.x * 2}rem`,
+        top: `${l.y * 2}rem`,
+        width: '2rem',
+        height: '2rem',
+        transform: `translate(${stackOffsetX}rem, ${stackOffsetY}rem)`
+      }}
+    >
+      <div className="relative group">
+        <Target className="w-8 h-8 text-yellow-500 absolute opacity-30" />
+        <Target className="w-8 h-8 text-yellow-500 relative z-10 drop-shadow-[0_0_5px_rgba(234,179,8,0.8)]" />
+
+        {/* Cancel Button */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            cancelLanding(l.id);
+          }}
+          className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full p-0.5 hover:bg-red-500 z-30 opacity-0 group-hover:opacity-100 transition-opacity"
+          title="Cancel Landing"
+        >
+          <X className="w-3 h-3" />
+        </button>
+
+        {/* Info Tooltip */}
+        <div className="absolute top-8 left-1/2 -translate-x-1/2 bg-black/90 border border-yellow-500/50 text-white text-[10px] p-1 rounded whitespace-nowrap z-30 rotate-[-45deg] pointer-events-none">
+          <div className="text-yellow-400 font-bold">TARGET: {l.time}</div>
+          <div className="text-gray-300">{l.assignedTo}</div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default function GridMap() {
-  const { players, movePlayer, landings, selectedTarget, selectTarget, cancelLanding, removePlayerFromMap, setSelectedPlayerId, user, updateMarchTimes, selectedBuilding, selectBuilding, rallies, activeMap } = useGameStore();
+  const { players, movePlayer, landings, selectedTarget, selectTarget, removePlayerFromMap, setSelectedPlayerId, user, updateMarchTimes, selectedBuilding, selectBuilding, rallies, activeMap } = useGameStore();
   const [zoom, setZoom] = React.useState(1);
   const GRID_SIZE = activeMap ? activeMap.size : 40;
 
@@ -361,42 +426,7 @@ export default function GridMap() {
       const stackOffsetX = baseOffsetX + (sameSpotIndex * horizontalSpacing);
       const stackOffsetY = baseOffsetY + (sameSpotIndex * -horizontalSpacing);
 
-      return (
-      <div
-        key={l.id}
-        className="absolute z-20 flex flex-col items-center pointer-events-auto transition-transform"
-        style={{
-          left: `${l.x * 2}rem`,
-          top: `${l.y * 2}rem`,
-          width: '2rem',
-          height: '2rem',
-          transform: `translate(${stackOffsetX}rem, ${stackOffsetY}rem)`
-        }}
-      >
-        <div className="relative group">
-          <Target className="w-8 h-8 text-yellow-500 animate-ping absolute opacity-75" />
-          <Target className="w-8 h-8 text-yellow-500 relative z-10 drop-shadow-[0_0_5px_rgba(234,179,8,0.8)]" />
-
-          {/* Cancel Button */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              cancelLanding(l.id);
-            }}
-            className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full p-0.5 hover:bg-red-500 z-30 opacity-0 group-hover:opacity-100 transition-opacity"
-            title="Cancel Landing"
-          >
-            <X className="w-3 h-3" />
-          </button>
-
-          {/* Info Tooltip */}
-          <div className="absolute top-8 left-1/2 -translate-x-1/2 bg-black/90 border border-yellow-500/50 text-white text-[10px] p-1 rounded whitespace-nowrap z-30 rotate-[-45deg] pointer-events-none">
-            <div className="text-yellow-400 font-bold">TARGET: {l.time}</div>
-            <div className="text-gray-300">{l.assignedTo}</div>
-          </div>
-        </div>
-      </div>
-      );
+      return <LandingMarker key={l.id} l={l} stackOffsetX={stackOffsetX} stackOffsetY={stackOffsetY} />;
     });
   };
 
@@ -444,7 +474,7 @@ export default function GridMap() {
              />
              {/* Status Badge */}
              {p.status !== 'IDLE' && (
-               <div className="absolute -top-2 -right-2 w-4 h-4 rounded-full bg-yellow-500 animate-pulse border border-black" />
+               <div className="absolute -top-1.5 -right-1.5 w-2.5 h-2.5 rounded-full bg-yellow-500 border border-black" />
              )}
           </div>
 

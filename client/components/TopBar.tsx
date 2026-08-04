@@ -1,46 +1,33 @@
 import React, { useState } from 'react';
 import { useGameStore } from '../store/useGameStore';
-import { Megaphone, Swords, Target, UserPlus, ShieldCheck, Volume2, VolumeX } from 'lucide-react';
+import { Megaphone, Swords, Target, UserPlus, ShieldCheck, Volume2, VolumeX, Users, ClipboardCheck } from 'lucide-react';
+import GroupingPanel from './GroupingPanel';
+import ReadinessPanel from './ReadinessPanel';
+import { launchStrFromLanding } from '../lib/launchTime';
+import { notify } from '../lib/toast';
 
 export default function TopBar() {
-  const { startRally, selectedTarget, selectedBuilding, createLanding, cancelLanding, tickerMsg, claimPlayer, players, user, teams, landings, soundVolume, soundMuted, setSoundVolume, setSoundMuted } = useGameStore();
+  const { startRally, selectedTarget, selectedBuilding, createLanding, cancelLanding, tickerMsg, claimPlayer, players, user, teams, landings, soundVolume, soundMuted, setSoundVolume, setSoundMuted, setGroupingOpen, setAvailability, presence } = useGameStore();
   const [landingTime, setLandingTime] = useState('');
   const [assignedTo, setAssignedTo] = useState('');
   const [rallyDurationSec, setRallyDurationSec] = useState(300); // 5 min default
   const [playerOffsets, setPlayerOffsets] = useState<Record<string, number>>({});
   const [showSequencePlanner, setShowSequencePlanner] = useState(false);
   const [copiedTeamId, setCopiedTeamId] = useState<string | null>(null);
+  const [showGroupingPanel, setShowGroupingPanelState] = useState(false);
+  const [showReadiness, setShowReadiness] = useState(false);
+
+  const setShowGroupingPanel = (open: boolean) => {
+    setShowGroupingPanelState(open);
+    setGroupingOpen(open);
+  };
 
   const myPlayer = user ? players.find(p => p.accountId === user.id) : null;
 
 
+  // Delegates to the shared launch-time calculator (client/lib/launchTime.ts).
   const calculateStartTime = (landingTimeString: string, marchTimeSeconds: number | null | undefined, rallyTimeSeconds: number = 300, offsetSeconds: number = 0) => {
-    if (!landingTimeString || marchTimeSeconds == null) return '--:--:--';
-
-    // Parse HH:MM:SS from string into current UTC date
-    const parts = landingTimeString.split(':').map(Number);
-    const hh = parts[0] || 0;
-    const mm = parts[1] || 0;
-    const ss = parts[2] || 0;
-    const now = new Date();
-
-    // Set target time today
-    const targetTime = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hh, mm, ss));
-
-    // If target time is before now, assume it's for tomorrow (or within 10m buffer)
-    if (targetTime.getTime() < now.getTime() - 600 * 1000) {
-       targetTime.setUTCDate(targetTime.getUTCDate() + 1);
-    }
-
-    // Launch Time = Target Hit Time + playerOffset - marchTime - rallyTime
-    const startTimeMs = targetTime.getTime() + (offsetSeconds * 1000) - (marchTimeSeconds * 1000) - (rallyTimeSeconds * 1000);
-    const startDate = new Date(startTimeMs);
-
-    const sHH = String(startDate.getUTCHours()).padStart(2, '0');
-    const sMM = String(startDate.getUTCMinutes()).padStart(2, '0');
-    const sSS = String(startDate.getUTCSeconds()).padStart(2, '0');
-
-    return `${sHH}:${sMM}:${sSS}`;
+    return launchStrFromLanding(landingTimeString, { marchSec: marchTimeSeconds, rallySec: rallyTimeSeconds, offsetSec: offsetSeconds }) ?? '--:--:--';
   };
 
   const getMarchTime = (player: any) => {
@@ -59,9 +46,9 @@ export default function TopBar() {
     if (selectedBuilding && myPlayer) {
       startRally(myPlayer.id, selectedBuilding, 300000); // 5 mins
     } else if (!myPlayer) {
-      alert("You must join the battle to start a rally.");
+      notify("You must join the battle to start a rally.", 'error');
     } else {
-      alert("Please select a building (Castle or Turret) to rally against.");
+      notify("Please select a building (Castle or Turret) to rally against.", 'info');
     }
   };
 
@@ -91,7 +78,10 @@ export default function TopBar() {
           }
 
           if (timeDiffMs < totalRequiredSeconds * 1000) {
-              alert(`Impossible landing time. Earliest possible landing requires ${totalRequiredSeconds} seconds from now.`);
+              const mins = Math.floor(totalRequiredSeconds / 60);
+              const secs = totalRequiredSeconds % 60;
+              const need = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+              notify(`Landing too soon — the earliest possible landing is ${need} from now (longest march + rally).`, 'error');
               return;
           }
       }
@@ -107,7 +97,7 @@ export default function TopBar() {
       );
       setShowSequencePlanner(false);
     } else {
-      alert("Please select a target, time, and assignee.");
+      notify("Please select a target, time, and assignee.", 'info');
     }
   };
 
@@ -131,12 +121,9 @@ export default function TopBar() {
 
     if (!targetTimeStr) return;
 
-    // Helper to build text with varying levels of detail/truncation to ensure it fits under 500 chars
     const buildPlanText = (truncateNameLen?: number) => {
-      let text = `⚔️ SVS PLAN: ${team.name.toUpperCase()} ⚔️\n`;
-      text += `🎯 Target: ${buildingType.toUpperCase()} | Hit: ${targetTimeStr} UTC\n`;
-      text += `⏱️ Rally: ${rallyTimeSec / 60}m (${rallyTimeSec}s)\n`;
-      text += `------------------------------------\n`;
+      let text = `⚔️ ${team.name.toUpperCase()}\n`;
+      text += `🎯 ${buildingType.toUpperCase()} | LAUNCH:\n`;
 
       const playersList = [...(team.players || [])];
       playersList.sort((a, b) => {
@@ -145,48 +132,31 @@ export default function TopBar() {
          return offsetA - offsetB;
       });
 
-      playersList.forEach((p, idx) => {
+      let lineNo = 0;
+      playersList.forEach((p) => {
         const mt = getMarchTime(p);
+        // Never broadcast a launch time we can't compute — skip players with no march time set.
+        if (mt <= 0) return;
+        lineNo++;
         const activePlayerOffset = teamLanding ? (team.playerOffsets?.[p.id] || 0) : (playerOffsets[p.id] || 0);
-        const launchStr = mt > 0 ? calculateStartTime(targetTimeStr, mt, rallyTimeSec, activePlayerOffset) : '--:--:--';
+        const launchStr = calculateStartTime(targetTimeStr, mt, rallyTimeSec, activePlayerOffset);
         let displayName = p.name;
         if (truncateNameLen && displayName.length > truncateNameLen) {
           displayName = displayName.substring(0, truncateNameLen) + '..';
         }
-        text += `${idx + 1}. [${displayName}] => LAUNCH: ${launchStr} UTC (M: ${mt}s | D: +${activePlayerOffset}s)\n`;
+        text += `${lineNo} ${displayName} @ ${launchStr}\n`;
       });
 
-      text += `------------------------------------\n`;
-      text += `⚡ Launch EXACTLY at 0.0s countdown!`;
+      text += `--- HIT : ${targetTimeStr} UTC`;
       return text;
     };
 
     let planText = buildPlanText();
 
     // If it exceeds 500 chars, try progressively truncating player names
-    if (planText.length > 500) {
-      planText = buildPlanText(12); // Try truncating to 12 chars
-    }
-    if (planText.length > 500) {
-      planText = buildPlanText(8);  // Try truncating to 8 chars
-    }
-    if (planText.length > 500) {
-      // Emergency extreme compression if still too long
-      const playersList = [...(team.players || [])];
-      playersList.sort((a, b) => {
-         const offsetA = teamLanding ? (team.playerOffsets?.[a.id] || 0) : (playerOffsets[a.id] || 0);
-         const offsetB = teamLanding ? (team.playerOffsets?.[b.id] || 0) : (playerOffsets[b.id] || 0);
-         return offsetA - offsetB;
-      });
-      let text = `⚔️ SVS: ${team.name.toUpperCase()} | Hit: ${targetTimeStr}\n`;
-      playersList.forEach((p, idx) => {
-        const mt = getMarchTime(p);
-        const activePlayerOffset = teamLanding ? (team.playerOffsets?.[p.id] || 0) : (playerOffsets[p.id] || 0);
-        const launchStr = mt > 0 ? calculateStartTime(targetTimeStr, mt, rallyTimeSec, activePlayerOffset) : '--:--:--';
-        text += `${idx + 1}. [${p.name.substring(0, 8)}] L: ${launchStr} (M:${mt}s/D:+${activePlayerOffset}s)\n`;
-      });
-      planText = text;
-    }
+    if (planText.length > 500) planText = buildPlanText(12);
+    if (planText.length > 500) planText = buildPlanText(8);
+    if (planText.length > 500) planText = buildPlanText(5);
 
     navigator.clipboard.writeText(planText).then(() => {
       setCopiedTeamId(team.id);
@@ -203,21 +173,33 @@ export default function TopBar() {
 
       {/* Ticker */}
       <div className="bg-red-900/20 border-b border-red-900/30 py-1 px-4 flex items-center gap-2 overflow-hidden">
-        <Megaphone className="w-4 h-4 text-red-500 animate-pulse flex-none" />
+        <Megaphone className="w-4 h-4 text-red-500 flex-none" />
         <div className="whitespace-nowrap animate-[marquee_20s_linear_infinite] text-red-300 text-xs font-mono">
           {tickerMsg}
         </div>
       </div>
 
       {/* Control Panel */}
-      <div className="flex flex-wrap gap-4 items-center justify-between px-6 py-3 bg-[var(--primary)] border-b border-white/5">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 bg-[var(--primary)] border-b border-white/5">
 
         {/* User Info */}
-        <div className="flex items-center gap-2 pr-4 flex-wrap">
+        <div className="flex items-center gap-2 flex-none">
             <div className="flex flex-col items-end">
                 <span className="text-[10px] text-cyan-500 font-bold uppercase tracking-widest">{user?.role || 'UNKNOWN'}</span>
                 <span className="text-sm text-white font-mono font-bold">{user?.username || 'Guest'}</span>
             </div>
+            {user && (
+              <button
+                onClick={() => setAvailability(presence[user.id] === 'away' ? 'online' : 'away')}
+                className="ml-2 flex items-center gap-1.5 px-2 py-1 rounded-full border border-white/15 hover:border-white/30 bg-black/30 transition-colors"
+                title="Toggle your availability (Online / Away)"
+              >
+                <span className={`w-2 h-2 rounded-full ${presence[user.id] === 'away' ? 'bg-yellow-500' : 'bg-green-500'}`} />
+                <span className={`text-[10px] font-mono font-bold uppercase ${presence[user.id] === 'away' ? 'text-yellow-400' : 'text-green-400'}`}>
+                  {presence[user.id] === 'away' ? 'Away' : 'Online'}
+                </span>
+              </button>
+            )}
             {/* Audio Controls */}
             <div className="ml-2 flex items-center gap-2 pl-2 border-l border-white/10">
                 <button
@@ -242,7 +224,7 @@ export default function TopBar() {
 
 
         {/* Team Cards */}
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-1 min-w-0 overflow-x-auto px-0.5 py-1">
           {teams.map(team => {
             const isSelected = assignedTo === team.name;
             const teamLanding = landings.find(l => l.assignedTo === team.name);
@@ -253,20 +235,22 @@ export default function TopBar() {
                 key={team.id}
                 onClick={() => setAssignedTo(isSelected ? '' : team.name)}
                 className={`
-                  flex flex-col items-center justify-center p-2 rounded border cursor-pointer transition-all
-                  ${isSelected ? 'ring-2 ring-yellow-400 scale-105' : 'hover:bg-white/5'}
+                  flex flex-none flex-col p-2 rounded-lg border cursor-pointer transition-all min-w-[132px]
+                  ${isSelected ? 'ring-2 ring-yellow-400' : 'hover:bg-white/5'}
                   ${status === 'RALLYING'
-                      ? 'border-yellow-500 bg-yellow-900/20'
-                      : (team.isEnemy ? 'border-red-500/50 bg-red-900/10' : 'border-cyan-500/30 bg-cyan-900/10')}
+                      ? 'border-yellow-500/70 bg-yellow-900/15'
+                      : (team.isEnemy ? 'border-red-500/40 bg-red-900/10' : 'border-cyan-500/30 bg-cyan-900/10')}
                 `}
               >
-                <span className="text-[10px] text-gray-400 font-bold uppercase whitespace-nowrap">{team.name}</span>
-                <span className={`text-[9px] font-mono ${status === 'RALLYING' ? 'text-yellow-400 animate-pulse' : (team.isEnemy ? 'text-red-400' : 'text-cyan-400')}`}>
-                  {status}
-                </span>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] text-gray-200 font-bold uppercase tracking-wide truncate">{team.name}</span>
+                  <span className={`text-[8px] font-mono uppercase tracking-wider px-1 rounded ${status === 'RALLYING' ? 'text-yellow-300 bg-yellow-500/10' : (team.isEnemy ? 'text-red-400' : 'text-cyan-400')}`}>
+                    {status}
+                  </span>
+                </div>
                 {/* Player Start Times */}
-                <div className="flex flex-col mt-1 w-full border-t border-white/10 pt-1 px-1">
-                    {team.players?.map(p => {
+                <div className="flex flex-col mt-1 w-full border-t border-white/10 pt-1 gap-0.5">
+                    {team.players?.map((p, idx) => {
                        // Use set landing time if exists, else the current input value for preview
                        const targetTimeStr = teamLanding ? teamLanding.time : (isSelected ? landingTime : null);
                        const mt = getMarchTime(p);
@@ -274,18 +258,33 @@ export default function TopBar() {
                        const activeRallyTime = teamLanding ? (team.rallyTime || 300) : rallyDurationSec;
                        const activePlayerOffset = teamLanding ? (team.playerOffsets?.[p.id] || 0) : (playerOffsets[p.id] || 0);
 
-                       const startTimeStr = (targetTimeStr && mt > 0) ? calculateStartTime(targetTimeStr, mt, activeRallyTime, activePlayerOffset) : '';
+                       const isMissingMarch = mt <= 0;
+                       const startTimeStr = (targetTimeStr && !isMissingMarch) ? calculateStartTime(targetTimeStr, mt, activeRallyTime, activePlayerOffset) : '';
 
                        return (
-                         <div key={p.id} className="flex justify-between items-center text-[9px] w-full gap-2">
-                             <span className="text-gray-300 truncate max-w-[50px]">{p.name}</span>
-                             <span className={`font-mono ${teamLanding ? 'text-yellow-400 font-bold' : 'text-gray-500'}`}>
-                                 {startTimeStr}
+                         <div key={p.id} className="flex justify-between items-center w-full gap-2">
+                             <span className="text-[10px] text-gray-300 truncate max-w-[70px]">
+                               <span className="text-gray-500 mr-1">{idx + 1}</span>{p.name}
                              </span>
+                             {targetTimeStr && isMissingMarch ? (
+                               <span className="text-[9px] font-mono font-bold text-red-400 whitespace-nowrap">⚠ no march</span>
+                             ) : (
+                               <span className={`text-[11px] font-mono font-bold tabular-nums ${teamLanding ? 'text-yellow-300' : startTimeStr ? 'text-cyan-300' : 'text-gray-600'}`}>
+                                 {startTimeStr || '—'}
+                               </span>
+                             )}
                          </div>
                        );
                     })}
                 </div>
+
+                {/* Hit time footer */}
+                {teamLanding && (
+                  <div className="flex justify-between items-center mt-1.5 pt-1 border-t border-white/10">
+                    <span className="text-[8px] text-gray-500 uppercase tracking-wider font-bold">Hit</span>
+                    <span className="text-[11px] font-mono font-bold text-yellow-400 tabular-nums">{teamLanding.time}</span>
+                  </div>
+                )}
 
                 {/* Copy Plan Clipboard Trigger */}
                 {(teamLanding || (isSelected && landingTime)) ? (
@@ -294,18 +293,18 @@ export default function TopBar() {
                       e.stopPropagation();
                       handleCopyPlan(team, teamLanding);
                     }}
-                    className={`mt-2 w-full py-1 text-[9px] font-black rounded border transition-all active:scale-95 flex items-center justify-center gap-1 ${
+                    className={`mt-1.5 w-full py-1 text-[10px] font-bold rounded-md border transition-all active:scale-95 flex items-center justify-center gap-1 ${
                       copiedTeamId === team.id
-                        ? 'bg-green-950 border-green-500 text-green-400 shadow-[0_0_8px_rgba(34,197,94,0.3)]'
-                        : 'bg-cyan-950/60 border-cyan-800/80 hover:border-cyan-400 text-cyan-400 hover:text-white'
+                        ? 'bg-green-950 border-green-500 text-green-400'
+                        : 'bg-cyan-950/60 border-cyan-800/80 hover:border-cyan-400 text-cyan-300 hover:text-white'
                     }`}
                     title="Copy launch schedule to clipboard"
                   >
-                    {copiedTeamId === team.id ? '✓ COPIED!' : '📋 COPY PLAN'}
+                    {copiedTeamId === team.id ? '✓ Copied' : '📋 Copy plan'}
                   </button>
                 ) : (
-                  <div className="text-[8px] text-gray-600 text-center italic mt-2 border-t border-white/5 pt-1.5 w-full">
-                    Awaiting Schedule
+                  <div className="text-[9px] text-gray-600 text-center italic mt-1.5 border-t border-white/5 pt-1 w-full">
+                    Awaiting schedule
                   </div>
                 )}
               </div>
@@ -314,12 +313,7 @@ export default function TopBar() {
         </div>
 
         {/* Rally Controls (Commander Only - mocked) */}
-        <div className="flex items-center gap-4 flex-wrap">
-
-          {/* Target Display */}
-          <div className="flex flex-col min-w-[100px]">
-             {/* Target coordinates display logic was here but it seems nested incorrectly or missing container in original broken file */}
-          </div>
+        <div className="flex items-center gap-3 flex-wrap justify-end">
 
           {/* Claim Player Button if not claimed */}
           {!hasClaimedPlayer && (
@@ -338,7 +332,7 @@ export default function TopBar() {
                       <span className="text-[10px] text-cyan-500 uppercase">Deployed As</span>
                       <span className="text-xs font-bold text-cyan-200">{myPlayer.name}</span>
                       {myPlayer.status === 'PENDING' && (
-                           <span className="text-[10px] text-yellow-500 font-bold animate-pulse">PENDING APPROVAL</span>
+                           <span className="text-[10px] text-yellow-500 font-bold">PENDING APPROVAL</span>
                       )}
                   </div>
               </div>
@@ -493,6 +487,29 @@ export default function TopBar() {
                 </button>
             )}
 
+            {/* Grouping Panel Trigger for Admins, Superadmins, and Commanders */}
+            {(user?.role === 'SUPERADMIN' || user?.role === 'ADMIN' || user?.role === 'COMMANDER') && (
+              <button
+                onClick={() => setShowGroupingPanel(true)}
+                className="flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-purple-900 to-indigo-900 hover:from-purple-700 hover:to-indigo-700 text-purple-200 border border-purple-500/50 hover:border-purple-300 font-bold text-xs rounded transition-all shadow-[0_0_12px_rgba(168,85,247,0.4)] active:scale-95"
+                title="Open Group Attack Planner"
+              >
+                <Users className="w-3.5 h-3.5 text-purple-300" />
+                GROUPING
+              </button>
+            )}
+
+            {(user?.role === 'SUPERADMIN' || user?.role === 'ADMIN' || user?.role === 'COMMANDER') && (
+              <button
+                onClick={() => setShowReadiness(true)}
+                className="flex items-center gap-2 px-3 py-2 bg-cyan-900/40 hover:bg-cyan-800/50 text-cyan-200 border border-cyan-500/40 hover:border-cyan-300 font-bold text-xs rounded transition-all active:scale-95"
+                title="March-time readiness (advisory — blocks nothing)"
+              >
+                <ClipboardCheck className="w-3.5 h-3.5 text-cyan-300" />
+                READINESS
+              </button>
+            )}
+
             <button
               onClick={handleStartRally}
               disabled={!selectedBuilding || !myPlayer}
@@ -506,6 +523,16 @@ export default function TopBar() {
         </div>
 
       </div>
+
+      <GroupingPanel
+        isOpen={showGroupingPanel}
+        onClose={() => setShowGroupingPanel(false)}
+      />
+
+      <ReadinessPanel
+        isOpen={showReadiness}
+        onClose={() => setShowReadiness(false)}
+      />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useGameStore } from '../store/useGameStore';
 import { Swords, Target, Clock, AlertTriangle, ShieldCheck, UserPlus, X, Play, Minus } from 'lucide-react';
+import { launchMsFromLanding, formatUtcHMS } from '../lib/launchTime';
 
 export default function PlayerHUD() {
   const { 
@@ -40,11 +41,21 @@ export default function PlayerHUD() {
     return teams.find(t => t.players.some(p => p.id === myPlayer.id));
   }, [myPlayer, teams]);
 
-  // Landing assigned to team
+  // Landing assigned to team or player
   const myLanding = useMemo(() => {
-    if (!myTeam) return null;
-    return landings.find(l => l.assignedTo === myTeam.name);
-  }, [myTeam, landings]);
+    if (!myPlayer) return null;
+    // 1. Check direct player landing or player offset
+    const directLanding = landings.find(l => l.assignedTo === myPlayer.name || (l.playerOffsets && l.playerOffsets[myPlayer.id] !== undefined));
+    if (directLanding) return directLanding;
+
+    // 2. Check team landing
+    if (myTeam) {
+      const teamLanding = landings.find(l => l.assignedTo === myTeam.name);
+      if (teamLanding) return teamLanding;
+    }
+
+    return null;
+  }, [myPlayer, myTeam, landings]);
 
   const getMarchTime = (player: any, buildingType: string | undefined) => {
     if (!buildingType) return 0;
@@ -90,28 +101,16 @@ export default function PlayerHUD() {
     }
   };
 
-  // Launch timing math
+  // Launch timing math (shared calculator — client/lib/launchTime.ts)
   const launchTimeMs = useMemo(() => {
-    if (!myLanding || !myPlayer || !myTeam) return null;
-
-    const parts = myLanding.time.split(':').map(Number);
-    const hh = parts[0] || 0;
-    const mm = parts[1] || 0;
-    const ss = parts[2] || 0;
-    const now = new Date();
-
-    const targetTime = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hh, mm, ss));
-    // Handle roll over if target time was in the past
-    if (targetTime.getTime() < now.getTime() - 600 * 1000) {
-      targetTime.setUTCDate(targetTime.getUTCDate() + 1);
-    }
+    if (!myLanding || !myPlayer) return null;
 
     const marchTimeSec = getMarchTime(myPlayer, myLanding.type || 'castle');
-    const rallyTimeSec = myTeam.rallyTime || 300;
-    const offsetSec = myTeam.playerOffsets?.[myPlayer.id] || 0;
+    const rallyTimeSec = myLanding.rallyTime || (myTeam?.rallyTime) || 300;
+    const offsetSec = (myLanding.playerOffsets?.[myPlayer.id]) || (myTeam?.playerOffsets?.[myPlayer.id]) || 0;
 
-    // Launch Time = Target Time + sequential delay - marchTime - rallyDuration
-    return targetTime.getTime() + (offsetSec * 1000) - (marchTimeSec * 1000) - (rallyTimeSec * 1000);
+    // Returns null when this player's march time is missing.
+    return launchMsFromLanding(myLanding.time, { marchSec: marchTimeSec, rallySec: rallyTimeSec, offsetSec });
   }, [myLanding, myPlayer, myTeam]);
 
   // High precision timer loop (100ms)
@@ -182,11 +181,7 @@ export default function PlayerHUD() {
 
   const getLaunchTimeStr = () => {
     if (!launchTimeMs) return '';
-    const d = new Date(launchTimeMs);
-    const hh = String(d.getUTCHours()).padStart(2, '0');
-    const mm = String(d.getUTCMinutes()).padStart(2, '0');
-    const ss = String(d.getUTCSeconds()).padStart(2, '0');
-    return `${hh}:${mm}:${ss} UTC`;
+    return `${formatUtcHMS(launchTimeMs)} UTC`;
   };
 
   const handleQuickLaunch = () => {
@@ -201,16 +196,17 @@ export default function PlayerHUD() {
 
   // Border and Shadow Glow classes based on urgency
   const getGlowStyles = () => {
+    // Urgency reads through colour, not a blinking card — only the countdown number animates.
     switch (urgency) {
       case 'launch':
-        return 'border-green-500 shadow-[0_0_25px_rgba(34,197,94,0.6)] bg-green-950/90 text-white animate-pulse';
+        return 'border-green-500 shadow-[0_0_20px_rgba(34,197,94,0.4)] bg-green-950/85 text-white';
       case 'urgent':
-        return 'border-red-500 shadow-[0_0_25px_rgba(239,68,68,0.5)] bg-red-950/80 text-white animate-[pulse_1s_infinite]';
+        return 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.4)] bg-red-950/80 text-white';
       case 'warning':
-        return 'border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.3)] bg-yellow-950/40 text-gray-100';
+        return 'border-yellow-500/70 shadow-[0_0_12px_rgba(234,179,8,0.25)] bg-yellow-950/40 text-gray-100';
       case 'standby':
       default:
-        return 'border-cyan-500/40 shadow-[0_0_20px_rgba(6,182,212,0.15)] bg-black/85 text-gray-200';
+        return 'border-cyan-500/40 shadow-[0_0_16px_rgba(6,182,212,0.12)] bg-black/85 text-gray-200';
     }
   };
 
@@ -227,7 +223,7 @@ export default function PlayerHUD() {
           onClick={() => setIsMinimized(false)}
           className="absolute bottom-4 right-4 z-40 border border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.4)] bg-black/90 text-white rounded-full px-4 py-2 flex items-center gap-3 cursor-pointer hover:bg-yellow-950/40 hover:scale-105 transition-all select-none font-sans"
         >
-          <AlertTriangle className="w-4 h-4 text-yellow-500 animate-bounce shrink-0" />
+          <AlertTriangle className="w-4 h-4 text-yellow-500 shrink-0" />
           <span className="text-xs font-bold text-yellow-500 uppercase tracking-widest text-[10px]">UNREGISTERED PROFILE</span>
           <span className="text-[10px] text-yellow-400 bg-yellow-950/60 border border-yellow-800/50 px-1.5 py-0.5 rounded font-mono font-bold hover:text-white">
             EXPAND ≫
@@ -239,7 +235,7 @@ export default function PlayerHUD() {
       <div className="absolute bottom-4 right-4 z-40 bg-black/90 border border-yellow-500/50 rounded-lg p-4 w-72 backdrop-blur-md shadow-2xl flex flex-col gap-3 font-sans">
         <div className="flex items-center justify-between text-yellow-500">
           <div className="flex items-center gap-2">
-            <AlertTriangle className="w-5 h-5 animate-bounce" />
+            <AlertTriangle className="w-5 h-5" />
             <span className="text-xs font-bold uppercase tracking-wider">Unregistered Profile</span>
           </div>
           <button
@@ -269,7 +265,7 @@ export default function PlayerHUD() {
           onClick={() => setIsMinimized(false)}
           className="absolute bottom-4 right-4 z-40 border border-cyan-500/50 shadow-[0_0_15px_rgba(6,182,212,0.4)] bg-black/90 text-white rounded-full px-4 py-2 flex items-center gap-3 cursor-pointer hover:bg-cyan-950/40 hover:scale-105 transition-all select-none font-sans"
         >
-          <ShieldCheck className="w-4 h-4 text-cyan-400 shrink-0 animate-pulse" />
+          <ShieldCheck className="w-4 h-4 text-cyan-400 shrink-0" />
           <span className="text-xs font-bold text-cyan-400 uppercase tracking-widest text-[10px]">HUD IDLE: {myPlayer.name}</span>
           <span className="text-[10px] text-cyan-400 bg-cyan-950 border border-cyan-800/50 px-1.5 py-0.5 rounded font-mono font-bold hover:text-white">
             EXPAND ≫
@@ -309,6 +305,21 @@ export default function PlayerHUD() {
   const sequenceDelay = myTeam?.playerOffsets?.[myPlayer.id] || 0;
   const rallyTime = myTeam?.rallyTime || 300;
 
+  // Guard: a missing march time silently computes as 0 and yields a wrong launch time.
+  if (marchTime <= 0) {
+    return (
+      <div className="absolute bottom-4 right-4 z-40 bg-black/90 border border-yellow-500/60 rounded-lg p-4 w-72 backdrop-blur-md shadow-2xl flex flex-col gap-3 font-sans">
+        <div className="flex items-center gap-2 text-yellow-500">
+          <AlertTriangle className="w-5 h-5" />
+          <span className="text-xs font-bold uppercase tracking-wider">March Time Missing</span>
+        </div>
+        <p className="text-[11px] text-gray-400 leading-relaxed">
+          A landing on <span className="text-yellow-400 font-bold uppercase">{myLanding.type || 'Castle'}</span> is set for <span className="text-white font-mono">{myLanding.time} UTC</span>, but your march time to this target isn&apos;t set — so your launch time can&apos;t be calculated. Set it on the map building or in your profile.
+        </p>
+      </div>
+    );
+  }
+
   if (isMinimized) {
     const pillGlowStyle = 
       urgency === 'launch' ? 'border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.6)] bg-green-950/95' :
@@ -344,14 +355,20 @@ export default function PlayerHUD() {
     );
   }
 
+  const countdownColor =
+    urgency === 'launch' ? 'text-green-400' :
+    urgency === 'urgent' ? 'text-red-400' :
+    urgency === 'warning' ? 'text-yellow-300' : 'text-white';
+
   return (
-    <div className={`absolute bottom-4 right-4 z-40 border rounded-lg p-4 w-72 backdrop-blur-md transition-all duration-300 flex flex-col gap-3 font-sans ${getGlowStyles()}`}>
-      <div className="flex items-center justify-between text-xs border-b border-white/10 pb-2">
-        <div className="flex items-center gap-1.5 font-bold uppercase tracking-widest text-cyan-400">
-          <Target className="w-4 h-4 text-cyan-400" /> Tactical HUD
+    <div className={`absolute bottom-4 right-4 z-40 border rounded-xl p-4 w-72 backdrop-blur-md transition-colors duration-300 flex flex-col gap-3 font-sans ${getGlowStyles()}`}>
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-white/10 pb-2">
+        <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-cyan-400">
+          <Target className="w-4 h-4" /> Tactical HUD
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] bg-cyan-950 text-cyan-400 border border-cyan-800 px-1.5 py-0.5 rounded font-mono font-bold animate-pulse">
+          <span className="text-[10px] bg-cyan-950/70 text-cyan-300 border border-cyan-800/60 px-2 py-0.5 rounded-full font-mono font-bold tracking-wide">
             {myPlayer.status}
           </span>
           <button
@@ -364,80 +381,71 @@ export default function PlayerHUD() {
         </div>
       </div>
 
+      {/* Who */}
       <div className="flex flex-col leading-tight">
-        <span className="text-sm font-bold text-white">{myPlayer.name}</span>
-        <span className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">{myTeam?.name || 'NO TEAM'} • {myPlayer.role}</span>
+        <span className="text-base font-bold text-white truncate">{myPlayer.name}</span>
+        <span className="text-[10px] text-gray-400 uppercase font-bold tracking-wider">{myTeam?.name || 'NO TEAM'} • {myPlayer.role}</span>
       </div>
 
-      <div className="bg-black/60 rounded p-2 border border-white/5 flex flex-col gap-1">
-        <div className="flex justify-between items-center text-[11px]">
-          <span className="text-gray-400">Target Building:</span>
-          <span className="text-yellow-400 font-bold uppercase font-mono">{myLanding.type || 'Castle'}</span>
-        </div>
-        <div className="flex justify-between items-center text-[11px]">
-          <span className="text-gray-400">Target Hit Time:</span>
-          <span className="text-white font-mono font-bold">{myLanding.time} UTC</span>
-        </div>
-        <div className="flex justify-between items-center text-[11px] border-t border-white/5 pt-1 mt-1">
-          <span className="text-cyan-400 font-bold">YOUR LAUNCH TIME:</span>
-          <span className="text-cyan-300 font-mono font-black bg-cyan-950/60 px-1.5 py-0.5 rounded border border-cyan-800/40">
-            {getLaunchTimeStr()}
-          </span>
-        </div>
-        <div className="flex justify-between items-center text-[11px] border-t border-white/5 pt-1">
-          <span className="text-gray-400">Your March Time:</span>
-          <span className="text-cyan-400 font-mono">{marchTime}s</span>
-        </div>
-        <div className="flex justify-between items-center text-[11px]">
-          <span className="text-gray-400">Your Hit Delay:</span>
-          <span className="text-yellow-400 font-mono">+{sequenceDelay}s</span>
-        </div>
-        <div className="flex justify-between items-center text-[11px]">
-          <span className="text-gray-400">Rally Buffer:</span>
-          <span className="text-red-400 font-mono">{rallyTime / 60}m ({rallyTime}s)</span>
-        </div>
-      </div>
-
-      <div className="flex flex-col items-center py-2 bg-black/40 rounded border border-white/5">
-        <span className="text-[9px] text-gray-400 uppercase tracking-widest mb-1 flex items-center gap-1 font-bold">
-          <Clock className="w-3 h-3" /> Digital Launch Countdown
+      {/* Hero countdown */}
+      <div className="flex flex-col items-center gap-0.5 py-3 rounded-lg bg-black/50 border border-white/10">
+        <span className="text-[10px] text-gray-400 uppercase tracking-[0.2em] font-bold flex items-center gap-1">
+          <Clock className="w-3 h-3" /> Launch in
         </span>
-        <span className="text-3xl font-mono font-black tracking-widest text-white leading-none">
+        <span className={`font-mono font-black leading-none tabular-nums tracking-tight text-[2.75rem] ${countdownColor}`}>
           {timeLeft !== null ? formatCountdown(timeLeft) : '--:--.-'}
         </span>
-        <span className="text-[10px] text-gray-400 font-mono mt-1">
-          Launch Window: {getLaunchTimeStr()}
+        <span className="text-[10px] text-cyan-300/90 font-mono">
+          Launch window {getLaunchTimeStr()}
         </span>
       </div>
 
-      {/* Instant Action buttons */}
+      {/* Details */}
+      <div className="rounded-lg border border-white/10 bg-black/40 divide-y divide-white/5 text-[12px]">
+        <div className="flex justify-between items-center px-3 py-1.5">
+          <span className="text-gray-400">Target</span>
+          <span className="text-yellow-400 font-bold uppercase font-mono">{myLanding.type || 'Castle'}</span>
+        </div>
+        <div className="flex justify-between items-center px-3 py-1.5">
+          <span className="text-gray-400">Hit time</span>
+          <span className="text-white font-mono">{myLanding.time} UTC</span>
+        </div>
+        <div className="flex justify-between items-center px-3 py-2 bg-cyan-500/10">
+          <span className="text-cyan-300 font-semibold">Your launch</span>
+          <span className="text-cyan-200 font-mono font-bold text-[13px]">{getLaunchTimeStr()}</span>
+        </div>
+        <div className="flex justify-between items-center px-3 py-1.5">
+          <span className="text-gray-400">March · delay · rally</span>
+          <span className="text-gray-200 font-mono tabular-nums">{`${marchTime}s · +${sequenceDelay}s · ${Math.floor(rallyTime / 60)}:${String(rallyTime % 60).padStart(2, '0')}`}</span>
+        </div>
+      </div>
+
+      {/* Action */}
       {myPlayer.status === 'IDLE' ? (
         <button
           onClick={handleQuickLaunch}
           disabled={urgency === 'standby'}
-          className={`
-            w-full py-2.5 rounded font-black text-sm flex items-center justify-center gap-1.5 transition-all shadow-lg active:scale-95
-            ${urgency === 'standby' 
+          className={`w-full py-2.5 rounded-lg font-black text-sm flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+            urgency === 'standby'
               ? 'bg-gray-800 text-gray-500 cursor-not-allowed border border-gray-700'
               : urgency === 'launch'
-              ? 'bg-green-600 hover:bg-green-500 text-black border border-green-400 shadow-green-900/50 font-extrabold animate-[bounce_1.5s_infinite]'
-              : 'bg-red-600 hover:bg-red-500 text-white border border-red-400 shadow-red-900/50'
-            }
-          `}
+              ? 'bg-green-600 hover:bg-green-500 text-black border border-green-400 animate-[pulse_1.4s_ease-in-out_infinite]'
+              : 'bg-red-600 hover:bg-red-500 text-white border border-red-400'
+          }`}
         >
-          <Swords className="w-4 h-4" /> 
-          {urgency === 'launch' ? 'LAUNCH RALLY NOW!' : 'LAUNCH CO-OP RALLY'}
+          <Swords className="w-4 h-4" />
+          {urgency === 'launch' ? 'LAUNCH RALLY NOW' : 'LAUNCH CO-OP RALLY'}
         </button>
       ) : activeRally ? (
         <button
           onClick={() => cancelRally(activeRally.id)}
-          className="w-full py-2 bg-red-950 border border-red-700 hover:bg-red-900 text-red-200 font-bold text-xs rounded transition-all shadow"
+          className="w-full py-2 bg-red-950 border border-red-800 hover:bg-red-900 text-red-200 font-bold text-xs rounded-lg transition-all"
         >
           CANCEL ACTIVE RALLY
         </button>
       ) : (
-        <div className="text-[10px] text-gray-500 text-center italic py-2">
-          Rally in progress... Check visual target indicators.
+        <div className="text-[11px] text-gray-500 text-center italic py-2">
+          Rally in progress — watch the map indicators.
         </div>
       )}
     </div>

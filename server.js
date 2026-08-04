@@ -26,7 +26,7 @@ app.use(express.json());
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "http://localhost:3000",
+    origin: "*",
     methods: ["GET", "POST"]
   }
 });
@@ -79,6 +79,23 @@ let USERS = [
 let CHAT_SILENCED = false;
 let IMPORTANT_ACCOUNTS = new Set();
 let ACTIVE_MAP = null;
+
+// --- Presence (in-memory, ephemeral) ---
+const ONLINE_COUNTS = new Map(); // accountId -> active socket count (web + app)
+const AWAY_ACCOUNTS = new Set();  // accountId -> self-set "away" while connected
+
+function getPresenceMap() {
+  // { accountId: 'online' | 'away' } for connected accounts; absent = offline.
+  const map = {};
+  for (const [accountId, count] of ONLINE_COUNTS.entries()) {
+    if (count > 0) map[accountId] = AWAY_ACCOUNTS.has(accountId) ? 'away' : 'online';
+  }
+  return map;
+}
+
+function broadcastPresence() {
+  io.emit('presence:update', { presence: getPresenceMap() });
+}
 let ALL_MAPS = [];
 
 const GRID_SIZE = 40; // 40x40 grid
@@ -386,11 +403,29 @@ io.on('connection', async (socket) => {
         serverTime: Date.now(),
         chatSilenced: CHAT_SILENCED,
         importantAccounts: Array.from(IMPORTANT_ACCOUNTS),
-        activeMap: ACTIVE_MAP
+        activeMap: ACTIVE_MAP,
+        presence: getPresenceMap()
       });
   } catch (e) {
       console.error("Error sending init state:", e);
   }
+
+  // --- Presence tracking ---
+  const presenceAccountId = socket.data.user?.id;
+  if (presenceAccountId) {
+    ONLINE_COUNTS.set(presenceAccountId, (ONLINE_COUNTS.get(presenceAccountId) || 0) + 1);
+    AWAY_ACCOUNTS.delete(presenceAccountId); // a fresh connection means "online"
+    broadcastPresence();
+  }
+
+  // Player sets their own availability ('online' | 'away') from web or the companion app.
+  socket.on('player:set_availability', (data) => {
+    const uid = socket.data.user?.id;
+    if (!uid || (ONLINE_COUNTS.get(uid) || 0) <= 0) return;
+    if (data && data.status === 'away') AWAY_ACCOUNTS.add(uid);
+    else AWAY_ACCOUNTS.delete(uid);
+    broadcastPresence();
+  });
 
   socket.on('auth:change_password', async (data) => {
        const { userId, newPassword } = data;
@@ -717,6 +752,76 @@ io.on('connection', async (socket) => {
 
     io.emit('notification', {
       message: `COMMANDER ORDER: LANDING SET AT ${formattedTime} UTC FOR ${assignedTo.toUpperCase()}`
+    });
+  });
+
+  // Grouping Prepare
+  socket.on('grouping:prepare', () => {
+    const user = socket.data.user;
+    if (!user || (user.role !== 'SUPERADMIN' && user.role !== 'ADMIN' && user.role !== 'COMMANDER')) return;
+
+    const senderName = user.username || 'Commander';
+    const alertMsg = 'GROUP ATTACK IS BEING SET UP! PREPARE YOUR RALLIES!';
+
+    io.emit('notification:alert', {
+      id: Date.now().toString(),
+      message: alertMsg,
+      sender: senderName
+    });
+
+    io.emit('notification', {
+      message: `[ALERT] ${senderName}: ${alertMsg}`
+    });
+  });
+
+  // Grouping Deploy
+  socket.on('grouping:deploy', (data) => {
+    const user = socket.data.user;
+    if (!user || (user.role !== 'SUPERADMIN' && user.role !== 'ADMIN' && user.role !== 'COMMANDER')) return;
+
+    const { landings: groupLandings } = data || {};
+    if (!Array.isArray(groupLandings) || groupLandings.length < 2) {
+      socket.emit('error', { message: 'Grouping deployment requires at least 2 target landings.' });
+      return;
+    }
+
+    // Process and add each landing to global LANDINGS
+    groupLandings.forEach(gLanding => {
+      // Remove existing landings for this assignedTo or target if any
+      LANDINGS = LANDINGS.filter(l => l.assignedTo !== gLanding.assignedTo && l.id !== gLanding.id);
+
+      const newLanding = {
+        id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 4),
+        x: gLanding.x || 20,
+        y: gLanding.y || 20,
+        time: gLanding.time,
+        assignedTo: gLanding.assignedTo,
+        type: gLanding.type,
+        rallyTime: gLanding.rallyTime || 300,
+        playerOffsets: gLanding.playerOffsets || {},
+        creatorId: socket.id
+      };
+      LANDINGS.push(newLanding);
+    });
+
+    // Broadcast updates
+    io.emit('landing:update', { landings: LANDINGS });
+
+    prisma.team.findMany({ include: { players: true } }).then(t => {
+      io.emit('admin:teams_data', { teams: getTeamsWithLandings(t, LANDINGS) });
+    });
+
+    const senderName = user.username || 'Commander';
+    const alertMsg = `GROUP ATTACK DEPLOYED ACROSS ${groupLandings.length} TARGETS!`;
+
+    io.emit('notification:alert', {
+      id: Date.now().toString(),
+      message: alertMsg,
+      sender: senderName
+    });
+
+    io.emit('notification', {
+      message: `COMMANDER ORDER: ${alertMsg}`
     });
   });
 
@@ -1413,6 +1518,13 @@ io.on('connection', async (socket) => {
 
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
+    const uid = socket.data.user?.id;
+    if (uid) {
+      const c = (ONLINE_COUNTS.get(uid) || 0) - 1;
+      if (c <= 0) { ONLINE_COUNTS.delete(uid); AWAY_ACCOUNTS.delete(uid); }
+      else ONLINE_COUNTS.set(uid, c);
+      broadcastPresence();
+    }
   });
 });
 

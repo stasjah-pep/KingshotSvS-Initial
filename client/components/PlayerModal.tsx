@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useGameStore } from '../store/useGameStore';
 import { X, Swords, Shield } from 'lucide-react';
+import { notify } from '../lib/toast';
 
 const MarchTimeInput = ({ field, value, label, pId }: { field: string, value: number | null | undefined, label: string, pId: string }) => {
     const { updateMarchTimes, players, user } = useGameStore();
@@ -21,14 +22,14 @@ const MarchTimeInput = ({ field, value, label, pId }: { field: string, value: nu
             <input
                 type="number"
                 min="0"
-                max="99"
+                max="3600"
                 disabled={!canControl}
                 value={localValue}
                 onKeyDown={(e) => e.stopPropagation()} // Prevent external capture
                 onChange={(e) => {
                     if (!canControl) return;
                     let valStr = e.target.value;
-                    if (valStr.length > 2) valStr = valStr.slice(0, 2);
+                    if (valStr.length > 4) valStr = valStr.slice(0, 4);
 
                     setLocalValue(valStr);
 
@@ -110,7 +111,7 @@ export default function PlayerModal() {
                                setSelectedPlayerId(null);
                                setRallyTarget('');
                            } else {
-                               alert('Enter a target');
+                               notify('Enter a target', 'info');
                            }
                        }}
                        className="bg-red-600 hover:bg-red-500 text-white text-xs font-bold px-3 py-1 rounded flex items-center gap-1 shadow-lg shadow-red-900/20"

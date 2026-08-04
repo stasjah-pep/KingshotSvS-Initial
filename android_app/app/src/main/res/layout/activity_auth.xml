@@ -71,7 +71,6 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:inputType="textUri"
-                            android:text="http://10.0.2.2:3001"
                             android:textColor="#FFFFFF" />
                     </com.google.android.material.textfield.TextInputLayout>
 
@@ -90,7 +89,6 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:inputType="text"
-                            android:text="Username"
                             android:textColor="#FFFFFF" />
                     </com.google.android.material.textfield.TextInputLayout>
 
@@ -112,7 +110,6 @@
                             android:layout_height="wrap_content"
                             android:autoText="false"
                             android:inputType="textPassword"
-                            android:text="Password"
                             android:textColor="#FFFFFF" />
                     </com.google.android.material.textfield.TextInputLayout>
 

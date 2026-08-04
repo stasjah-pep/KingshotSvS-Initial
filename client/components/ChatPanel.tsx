@@ -3,12 +3,13 @@ import { useGameStore } from '../store/useGameStore';
 import { Send, Trash } from 'lucide-react';
 
 export default function ChatPanel() {
-  const { chatLogs, sendMessage, clearChat, isConnected, toggleBlockUser, isChatSilenced, toggleChatSilence, markMessageImportant, toggleImportantAccount } = useGameStore();
+  const { chatLogs, sendMessage, clearChat, isConnected, toggleBlockUser, isChatSilenced, toggleChatSilence, markMessageImportant, toggleImportantAccount, isGroupingOpen } = useGameStore();
   const [input, setInput] = useState('');
   const [username, setUsername] = useState('Guest');
   const [role, setRole] = useState('USER');
   const [panelHeight, setPanelHeight] = useState(192);
   const [selectedMessage, setSelectedMessage] = useState<{ userId?: string, messageId?: number } | null>(null);
+  const [isChatExpanded, setIsChatExpanded] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -24,14 +25,6 @@ export default function ChatPanel() {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatLogs]);
-
-  useEffect(() => {
-      const handleClickOutside = (e: MouseEvent) => {
-          // If clicking outside chat log area, deselect. (handled by standard DOM flow, simplified for selection)
-      };
-      window.addEventListener('click', handleClickOutside);
-      return () => window.removeEventListener('click', handleClickOutside);
-  }, []);
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,8 +72,12 @@ export default function ChatPanel() {
 
   return (
     <div
-        className="flex flex-col w-full border-t border-[var(--grid)] bg-black/80 backdrop-blur-md z-20 shadow-[0_-5px_20px_rgba(0,0,0,0.5)] relative"
-        style={{ height: panelHeight }}
+        className={
+          isGroupingOpen
+            ? "fixed left-4 bottom-4 w-80 h-72 rounded-xl border-2 border-cyan-500/80 bg-black/95 backdrop-blur-md z-[250] shadow-[0_0_30px_rgba(0,0,0,0.9)] flex flex-col transition-all duration-300 pointer-events-auto"
+            : "flex flex-col w-full border-t border-[var(--grid)] bg-black/80 backdrop-blur-md z-20 shadow-[0_-5px_20px_rgba(0,0,0,0.5)] relative transition-all duration-300"
+        }
+        style={{ height: isGroupingOpen ? undefined : panelHeight }}
         onClick={handlePanelClick}
     >
       {/* Resizer Handle */}
@@ -149,8 +146,19 @@ export default function ChatPanel() {
                    </button>
                  </>
              )}
-         </div>
-         <div className={`w-2 h-2 rounded-full flex-shrink-0 ml-2 ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} title={isConnected ? "Connected" : "Disconnected"} />
+          </div>
+          <div className="flex items-center gap-2">
+            {isGroupingOpen && (
+              <button
+                onClick={(e) => { e.stopPropagation(); setIsChatExpanded(false); }}
+                className="text-gray-400 hover:text-white text-xs font-bold px-1 bg-gray-800 rounded border border-gray-600"
+                title="Minimize Chat"
+              >
+                —
+              </button>
+            )}
+            <div className={`w-2 h-2 rounded-full flex-shrink-0 ml-1 ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} title={isConnected ? "Connected" : "Disconnected"} />
+          </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-1 font-mono text-xs scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">

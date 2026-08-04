@@ -5,11 +5,14 @@ import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import TopBar from './TopBar';
 import PlayerModal from './PlayerModal';
+import ChatPanel from './ChatPanel';
+import ToastHost from './ToastHost';
+import { notify } from '../lib/toast';
 import { Swords } from 'lucide-react';
 
 const PlayerCard = ({ player, isEnemy }: { player: Player; isEnemy: boolean }) => {
   const { setSelectedPlayerId, selectedBuilding, startRally, user, togglePlayerMute } = useGameStore();
-  const statusColor = player.status === 'RALLYING' ? 'text-red-500 animate-pulse' :
+  const statusColor = player.status === 'RALLYING' ? 'text-red-500' :
                       player.status === 'MARCHING' ? 'text-yellow-500' : 'text-gray-400';
 
   const handleDragStart = (e: React.DragEvent) => {
@@ -33,7 +36,7 @@ const PlayerCard = ({ player, isEnemy }: { player: Player; isEnemy: boolean }) =
           <img src={player.avatar || `https://ui-avatars.com/api/?name=${player.name}`} alt={player.name} className="w-full h-full object-cover" />
         </div>
         {player.status !== 'IDLE' && (
-          <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full animate-ping" />
+          <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border border-black/40" />
         )}
       </div>
 
@@ -58,7 +61,7 @@ const PlayerCard = ({ player, isEnemy }: { player: Player; isEnemy: boolean }) =
         <div className="flex justify-between items-center text-xs mt-1">
           <span className="text-gray-500">{player.power.toLocaleString()} PWR</span>
           <div className="flex items-center gap-1">
-             {player.status === 'RALLYING' && <Sword className="w-3 h-3 text-red-500 animate-spin" />}
+             {player.status === 'RALLYING' && <Sword className="w-3 h-3 text-red-500" />}
              <span className={`font-mono ${statusColor}`}>{player.status}</span>
           </div>
         </div>
@@ -87,7 +90,7 @@ const PlayerCard = ({ player, isEnemy }: { player: Player; isEnemy: boolean }) =
 };
 
 export default function Layout({ children }: { children: React.ReactNode }) {
-  const { players, connect, isConnected, user, selectTarget, alerts, removeAlert } = useGameStore();
+  const { players, connect, isConnected, user, selectTarget, alerts, removeAlert, isGroupingOpen } = useGameStore();
   const router = useRouter();
   const pathname = usePathname();
   const [authorized, setAuthorized] = useState(false);
@@ -164,7 +167,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           });
           socket.on('auth:password_changed', () => {
               setMustChangePassword(false);
-              alert('Password changed successfully.');
+              notify('Password changed successfully.', 'success');
           });
       }
       return () => {
@@ -194,6 +197,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex flex-col h-screen w-screen bg-[var(--background)] text-[var(--foreground)] overflow-hidden font-sans">
+      <ToastHost />
       {mustChangePassword && (
           <div className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center">
               <div className="bg-gray-900 border border-red-500 p-8 rounded shadow-2xl max-w-md w-full">
@@ -220,7 +224,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] flex flex-col gap-2 pointer-events-none">
         {alerts.map(alert => (
           <div key={alert.id} className="pointer-events-auto bg-red-900 border-2 border-red-500 text-white p-4 rounded shadow-2xl flex items-center gap-4 animate-in fade-in slide-in-from-top-4">
-            <Megaphone className="w-6 h-6 text-red-500 animate-pulse" />
+            <Megaphone className="w-6 h-6 text-red-500" />
             <div className="flex flex-col">
               <span className="text-xs text-red-300 font-bold uppercase tracking-widest">{alert.sender}</span>
               <span className="font-mono text-lg">{alert.message}</span>
@@ -233,7 +237,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* Top Bar */}
       <header className="h-16 flex-none border-b border-[var(--grid)] bg-[var(--primary)] flex items-center px-6 justify-between shadow-lg z-50">
         <div className="flex items-center gap-4">
-          <Shield className="w-8 h-8 text-accent animate-pulse" />
+          <Shield className="w-8 h-8 text-accent" />
           <h1 className="text-xl font-black tracking-[0.2em] text-accent drop-shadow-[0_0_5px_rgba(0,240,255,0.5)]">
             COMMAND HUB <span className="text-xs font-normal opacity-50 ml-2 mr-4">v1.0.0</span>
             <span className="text-sm font-mono text-cyan-300 bg-black/50 px-3 py-1 rounded border border-cyan-800 shadow-[0_0_10px_rgba(0,255,255,0.2)]">

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { io, Socket } from 'socket.io-client';
+import { notify } from '../lib/toast';
 
 export interface Player {
   id: string;
@@ -115,6 +116,7 @@ interface GameState {
   importantAccounts: string[];
   maps: MapLayout[];
   activeMap: MapLayout | null;
+  presence: Record<string, string>; // accountId -> 'online' | 'away' (absent = offline)
 
   soundVolume: number;
   soundMuted: boolean;
@@ -122,6 +124,7 @@ interface GameState {
   setSoundVolume: (vol: number) => void;
   setSoundMuted: (muted: boolean) => void;
   togglePlayerMute: (playerId: string) => void;
+  setAvailability: (status: 'online' | 'away') => void;
 
   connect: (token?: string) => void;
   disconnect: () => void;
@@ -136,6 +139,10 @@ interface GameState {
   selectBuilding: (building: string | null) => void;
   createLanding: (x: number, y: number, time: string, assignedTo: string, type?: string, rallyTime?: number, playerOffsets?: Record<string, number>) => void;
   cancelLanding: (id: string) => void;
+  isGroupingOpen: boolean;
+  setGroupingOpen: (open: boolean) => void;
+  sendGroupingPrepare: () => void;
+  deployGroupingAttack: (landings: any[]) => void;
   setTickerMsg: (msg: string) => void;
   sendAlert: (msg: string) => void;
   removeAlert: (id: string) => void;
@@ -189,6 +196,10 @@ export const useGameStore = create<GameState>((set, get) => ({
   importantAccounts: [],
   maps: [],
   activeMap: null,
+  presence: {},
+  isGroupingOpen: false,
+
+  setGroupingOpen: (open: boolean) => set({ isGroupingOpen: open }),
 
   soundVolume: typeof window !== 'undefined' && localStorage.getItem('soundVolume') ? parseFloat(localStorage.getItem('soundVolume')!) : 0.5,
   soundMuted: typeof window !== 'undefined' && localStorage.getItem('soundMuted') === 'true',
@@ -205,6 +216,10 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   togglePlayerMute: (playerId) => {
       get().socket?.emit('admin:toggle_player_mute', { playerId });
+  },
+
+  setAvailability: (status) => {
+      get().socket?.emit('player:set_availability', { status });
   },
 
   connect: (token?: string) => {
@@ -260,8 +275,13 @@ export const useGameStore = create<GameState>((set, get) => ({
         serverTimeOffset: offset,
         isChatSilenced: data.chatSilenced || false,
         importantAccounts: data.importantAccounts || [],
-        activeMap: data.activeMap || null
+        activeMap: data.activeMap || null,
+        presence: data.presence || {}
       });
+    });
+
+    socket.on('presence:update', (data: any) => {
+        set({ presence: data.presence || {} });
     });
 
     socket.on('chat:silence_update', (data: any) => {
@@ -323,9 +343,8 @@ export const useGameStore = create<GameState>((set, get) => ({
     });
 
     socket.on('error', (data: any) => {
-        // Use a more subtle notification or toast in real app
         console.error(data.message);
-        alert(data.message);
+        notify(data.message, 'error');
     });
   },
 
@@ -388,6 +407,20 @@ export const useGameStore = create<GameState>((set, get) => ({
     const { socket } = get();
     if (socket) {
       socket.emit('landing:cancel', { landingId: id });
+    }
+  },
+
+  sendGroupingPrepare: () => {
+    const { socket } = get();
+    if (socket) {
+      socket.emit('grouping:prepare');
+    }
+  },
+
+  deployGroupingAttack: (landings: any[]) => {
+    const { socket } = get();
+    if (socket) {
+      socket.emit('grouping:deploy', { landings });
     }
   },
 

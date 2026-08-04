@@ -74,7 +74,7 @@ const RallyItem = ({ rally, isEnemy }: { rally: Rally, isEnemy: boolean }) => {
   const textColor = isMarching ? 'text-yellow-300' : baseTextColor;
   const dropShadow = isMarching ? 'drop-shadow-[0_0_8px_rgba(255,255,0,1)]' : baseDropShadow;
   const scaleEffect = isMarching ? 'scale-105 transition-transform duration-500' : '';
-  const pulseEffect = isMarching ? 'animate-[pulse_1s_infinite]' : 'animate-[pulse_2s_infinite]';
+  const pulseEffect = isMarching ? 'animate-[pulse_1.6s_ease-in-out_infinite]' : '';
 
   return (
     <div className={`flex items-center justify-between gap-4 p-2 bg-black/60 border ${borderColor} rounded backdrop-blur-sm ${shadowColor} ${pulseEffect} ${scaleEffect}`}>

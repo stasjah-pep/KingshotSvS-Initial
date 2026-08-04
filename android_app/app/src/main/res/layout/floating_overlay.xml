@@ -1,36 +1,73 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Floating overlay shell. Top: close + minimize/enlarge. Middle: the target pills
+     (overlay_target.xml). Bottom: the drag grip. Everything is wrap_content so the shell sizes
+     to its widest child (the pills) and stays compact when minimized instead of spanning the
+     screen. Shell is transparent; the pills carry their own translucent backgrounds. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:background="#AA000000"
-    android:padding="5dp">
+    android:padding="2dp">
 
-    <TextView
-        android:id="@+id/dragHandle"
-        android:layout_width="match_parent"
+    <!-- Top control bar: close + minimize/enlarge (compact so it never stretches the shell) -->
+    <LinearLayout
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="MOVE"
-        android:textColor="#FFFFFF"
-        android:textStyle="bold"
-        android:gravity="center"
-        android:background="#555555"
-        android:padding="5dp"
-        android:layout_marginBottom="5dp"/>
+        android:layout_marginBottom="6dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/btnClose"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="#66101418"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:paddingLeft="10dp"
+            android:paddingTop="3dp"
+            android:paddingRight="10dp"
+            android:paddingBottom="3dp"
+            android:text="✕"
+            android:textColor="#E5484D"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/btnMinimize"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:background="#66101418"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:paddingLeft="12dp"
+            android:paddingTop="3dp"
+            android:paddingRight="12dp"
+            android:paddingBottom="3dp"
+            android:text="▁"
+            android:textColor="#9AACAA"
+            android:textSize="11sp" />
+    </LinearLayout>
 
     <LinearLayout
         android:id="@+id/buttonsContainer"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:orientation="vertical">
-    </LinearLayout>
+        android:orientation="vertical" />
 
-    <Button
-        android:id="@+id/btnClose"
-        android:layout_width="match_parent"
+    <!-- Bottom: drag grip -->
+    <TextView
+        android:id="@+id/dragHandle"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Close"
-        android:textSize="10sp"
-        android:layout_marginTop="5dp"
-        android:backgroundTint="#FF0000" />
+        android:layout_marginTop="6dp"
+        android:background="#66101418"
+        android:gravity="center"
+        android:paddingLeft="14dp"
+        android:paddingTop="4dp"
+        android:paddingRight="14dp"
+        android:paddingBottom="4dp"
+        android:text="⠿ move"
+        android:textColor="#80FFFFFF"
+        android:textSize="11sp" />
 </LinearLayout>

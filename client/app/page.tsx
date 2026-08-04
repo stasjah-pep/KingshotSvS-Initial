@@ -5,9 +5,11 @@ import ChatPanel from '../components/ChatPanel';
 import RallyTimers from '../components/RallyTimers';
 import PlayerHUD from '../components/PlayerHUD';
 import { useSoundEffects } from '../hooks/useSoundEffects';
+import { useGameStore } from '../store/useGameStore';
 
 export default function Home() {
   useSoundEffects();
+  const { isGroupingOpen } = useGameStore();
 
   return (
     <Layout>

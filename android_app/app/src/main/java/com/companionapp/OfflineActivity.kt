@@ -30,6 +30,15 @@ class OfflineActivity : AppCompatActivity() {
     private val colorNames = arrayOf("Red", "Blue", "Green", "Purple", "Orange")
     private val colorValues = arrayOf("red", "blue", "green", "purple", "#FFA500")
 
+    // Group planner targets: id, display name, march-time field.
+    private val groupTargets = listOf(
+        Triple("castle", "Castle", "mtCastle"),
+        Triple("north", "North Turret", "mtNorth"),
+        Triple("east", "East Turret", "mtEast"),
+        Triple("south", "South Turret", "mtSouth"),
+        Triple("west", "West Turret", "mtWest")
+    )
+
     private lateinit var etPlayerName: EditText
     private lateinit var btnCreatePlayer: Button
     private lateinit var llPlayersList: LinearLayout
@@ -42,6 +51,14 @@ class OfflineActivity : AppCompatActivity() {
     private lateinit var btnCreateTeam: Button
     private lateinit var llOfflineTeamsList: LinearLayout
     private lateinit var btnToggleOverlay: Button
+
+    // Group planner views
+    private lateinit var etGroupLandingTime: EditText
+    private lateinit var etGroupCastleOffset: EditText
+    private lateinit var etGroupDelay: EditText
+    private lateinit var cbGroupOverlay: CheckBox
+    private lateinit var llGroupSections: LinearLayout
+    private lateinit var tvGroupStatus: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -127,6 +144,67 @@ class OfflineActivity : AppCompatActivity() {
             finish()
         }
 
+        // --- Group Attack Planner ---
+        etGroupLandingTime = findViewById(R.id.etGroupLandingTime)
+        etGroupCastleOffset = findViewById(R.id.etGroupCastleOffset)
+        llGroupSections = findViewById(R.id.llGroupSections)
+        tvGroupStatus = findViewById(R.id.tvGroupStatus)
+
+        val savedGroup = getGroup()
+        etGroupLandingTime.setText(savedGroup.optString("landingTime", ""))
+        etGroupCastleOffset.setText(savedGroup.optInt("castleOffset", 0).toString())
+
+        etGroupDelay = findViewById(R.id.etGroupDelay)
+        cbGroupOverlay = findViewById(R.id.cbGroupOverlay)
+        etGroupDelay.setText(savedGroup.optInt("delay", 0).toString())
+        cbGroupOverlay.isChecked = savedGroup.optBoolean("overlayEnabled", false)
+        etGroupDelay.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                val g = getGroup(); g.put("delay", s.toString().trim().toIntOrNull() ?: 0); saveGroup(g)
+            }
+        })
+        cbGroupOverlay.setOnCheckedChangeListener { _, checked ->
+            val g = getGroup(); g.put("overlayEnabled", checked); saveGroup(g); updateOverlay()
+        }
+
+        etGroupLandingTime.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                val g = getGroup(); g.put("landingTime", s.toString().trim()); saveGroup(g); updateGroupStatus()
+            }
+        })
+        etGroupCastleOffset.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                val g = getGroup(); g.put("castleOffset", s.toString().trim().toIntOrNull() ?: 0); saveGroup(g)
+            }
+        })
+
+        findViewById<Button>(R.id.btnGroupSuggest).setOnClickListener {
+            val suggested = suggestGroupLandingTime()
+            if (suggested != null) {
+                etGroupLandingTime.setText(suggested)
+                Toast.makeText(this, "Set earliest feasible landing time.", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Assign a team or player to a target first.", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        findViewById<Button>(R.id.btnGroupCopyPlan).setOnClickListener {
+            val plan = buildGroupPlan()
+            if (plan == null || plan.isBlank()) {
+                Toast.makeText(this, "Set a valid landing time and assign forces first.", Toast.LENGTH_LONG).show()
+            } else {
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("SVS Group Plan", plan))
+                Toast.makeText(this, "Group plan copied to clipboard!", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         refreshUI()
     }
 
@@ -201,6 +279,25 @@ class OfflineActivity : AppCompatActivity() {
             }
         }
 
+        // Group overlay button (tap = instant copy of the whole group plan at earliest + delay).
+        val group = getGroup()
+        if (group.optBoolean("overlayEnabled", false) &&
+            groupTargets.any { sectionEnabled(group, it.first) && groupSectionPlayerIds(group, it.first).isNotEmpty() }) {
+            val gm = HashMap<String, String>()
+            gm["target"] = "GROUP"
+            gm["teamTarget"] = "GROUP"
+            gm["color"] = "#EAB308"
+            gm["action"] = "offline_group_click"
+            gm["customMarchTimeMs"] = "300000"
+            gm["isBlinking"] = "false"
+            gm["activeRallyId"] = ""
+            gm["initiatorId"] = ""
+            gm["isEnemy"] = "false"
+            gm["rallyEndTime"] = ""
+            gm["utcTime"] = ""
+            serviceList.add(gm)
+        }
+
         FloatingOverlayService.updateButtons(serviceList)
         
         // If service is running, notify it to redraw
@@ -221,6 +318,8 @@ class OfflineActivity : AppCompatActivity() {
     private fun refreshUI() {
         renderPlayersList()
         renderTeamsList()
+        renderGroupPlanner()
+        updateGroupStatus()
     }
 
     // --- SharedPreferences Storage Helpers ---
@@ -415,6 +514,16 @@ class OfflineActivity : AppCompatActivity() {
         if (team != null) {
             team.put("landingTime", landingTimeStr)
             saveTeams(teams)
+        }
+    }
+
+    private fun updateTeamLaunchDelay(teamId: String, delaySec: Int) {
+        val teams = getStoredTeams()
+        val team = teams.find { it.optString("id") == teamId }
+        if (team != null) {
+            team.put("launchDelay", delaySec)
+            saveTeams(teams)
+            updateOverlay()
         }
     }
 
@@ -643,13 +752,47 @@ class OfflineActivity : AppCompatActivity() {
 
             // Team properties
             val tvDetails = TextView(this).apply {
-                text = "Target: ${target.toUpperCase()}  |  Launch Delay: ${launchDelay}s"
+                text = "Target: ${target.toUpperCase()}"
                 setTextColor(Color.parseColor("#06B6D4"))
                 textSize = 12f
                 typeface = android.graphics.Typeface.MONOSPACE
-                setPadding(0, 0, 0, 12)
+                setPadding(0, 0, 0, 8)
             }
             teamCard.addView(tvDetails)
+
+            // Editable first-launch delay (used by this team's overlay button).
+            val delayRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, 0, 0, 12)
+            }
+            val delayLabel = TextView(this).apply {
+                text = "First launch delay (s):  "
+                setTextColor(Color.parseColor("#B0B0B0"))
+                textSize = 12f
+            }
+            val etTeamDelay = EditText(this).apply {
+                inputType = InputType.TYPE_CLASS_NUMBER
+                setText(launchDelay.toString())
+                setTextColor(Color.parseColor("#06B6D4"))
+                textSize = 13f
+                typeface = android.graphics.Typeface.MONOSPACE
+                gravity = android.view.Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(
+                    (60 * resources.displayMetrics.density + 0.5f).toInt(),
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+                addTextChangedListener(object : TextWatcher {
+                    override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                    override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                    override fun afterTextChanged(s: Editable?) {
+                        updateTeamLaunchDelay(teamId, s.toString().toIntOrNull() ?: 10)
+                    }
+                })
+            }
+            delayRow.addView(delayLabel)
+            delayRow.addView(etTeamDelay)
+            teamCard.addView(delayRow)
 
             // Players assigned section header
             val tvPlayersHeader = TextView(this).apply {
@@ -934,7 +1077,7 @@ class OfflineActivity : AppCompatActivity() {
                             tvCalculatedTimes.text = report.launchListDisplay
                             tvCalculatedTimes.visibility = View.VISIBLE
                         } else {
-                            Toast.makeText(this@OfflineActivity, "Roster contains missing march times.", Toast.LENGTH_LONG).show()
+                            Toast.makeText(this@OfflineActivity, "Enter a valid landing time (HH:mm:ss).", Toast.LENGTH_LONG).show()
                         }
                     } else {
                         Toast.makeText(this@OfflineActivity, "Enter HH:mm:ss format", Toast.LENGTH_SHORT).show()
@@ -977,7 +1120,7 @@ class OfflineActivity : AppCompatActivity() {
                             clipboard.setPrimaryClip(clip)
                             Toast.makeText(this@OfflineActivity, "Plan copied to clipboard!", Toast.LENGTH_SHORT).show()
                         } else {
-                            Toast.makeText(this@OfflineActivity, "Roster contains missing march times.", Toast.LENGTH_LONG).show()
+                            Toast.makeText(this@OfflineActivity, "Enter a valid landing time (HH:mm:ss).", Toast.LENGTH_LONG).show()
                         }
                     } else {
                         Toast.makeText(this@OfflineActivity, "Please enter and calculate landing time first", Toast.LENGTH_SHORT).show()
@@ -987,6 +1130,348 @@ class OfflineActivity : AppCompatActivity() {
 
             teamCard.addView(btnCopyPlan)
             llOfflineTeamsList.addView(teamCard)
+        }
+    }
+
+    // ===================== Group Attack Planner =====================
+
+    private fun defaultGroup(): JSONObject {
+        val g = JSONObject()
+        g.put("landingTime", "")
+        g.put("castleOffset", 0)
+        g.put("delay", 0)
+        g.put("overlayEnabled", false)
+        val sections = JSONObject()
+        for ((id, _, _) in groupTargets) {
+            sections.put(id, JSONObject().put("teamId", "").put("playerIds", JSONArray()).put("enabled", true))
+        }
+        g.put("sections", sections)
+        return g
+    }
+
+    private fun getGroup(): JSONObject {
+        val prefs = getSharedPreferences("CompanionAppPrefs", Context.MODE_PRIVATE)
+        val str = prefs.getString("offlineGroup", null) ?: return defaultGroup()
+        return try {
+            val g = JSONObject(str)
+            if (!g.has("sections")) defaultGroup() else g
+        } catch (e: Exception) { defaultGroup() }
+    }
+
+    private fun saveGroup(g: JSONObject) {
+        val prefs = getSharedPreferences("CompanionAppPrefs", Context.MODE_PRIVATE)
+        prefs.edit().putString("offlineGroup", g.toString()).apply()
+    }
+
+    private fun groupSection(g: JSONObject, targetId: String): JSONObject {
+        val sections = g.optJSONObject("sections") ?: JSONObject().also { g.put("sections", it) }
+        var sec = sections.optJSONObject(targetId)
+        if (sec == null) {
+            sec = JSONObject().put("teamId", "").put("playerIds", JSONArray()).put("enabled", true)
+            sections.put(targetId, sec)
+        }
+        return sec
+    }
+
+    // Effective player ids for a target = assigned team roster + any individual players.
+    private fun groupSectionPlayerIds(g: JSONObject, targetId: String): List<String> {
+        val sec = g.optJSONObject("sections")?.optJSONObject(targetId) ?: return emptyList()
+        val ids = LinkedHashSet<String>()
+        val teamId = sec.optString("teamId", "")
+        if (teamId.isNotEmpty()) {
+            val team = getStoredTeams().find { it.optString("id") == teamId }
+            val assigned = team?.optJSONArray("assignedPlayers")
+            if (assigned != null) for (i in 0 until assigned.length()) ids.add(assigned.getString(i))
+        }
+        val indiv = sec.optJSONArray("playerIds")
+        if (indiv != null) for (i in 0 until indiv.length()) ids.add(indiv.getString(i))
+        return ids.toList()
+    }
+
+    private fun sectionEnabled(g: JSONObject, targetId: String): Boolean =
+        g.optJSONObject("sections")?.optJSONObject(targetId)?.optBoolean("enabled", true) ?: true
+
+    // Every player already placed on any target — used to keep a player unique across targets.
+    private fun allAssignedPlayerIds(g: JSONObject): Set<String> {
+        val ids = HashSet<String>()
+        for ((id, _, _) in groupTargets) ids.addAll(groupSectionPlayerIds(g, id))
+        return ids
+    }
+
+    private fun setSectionEnabled(targetId: String, enabled: Boolean) {
+        val g = getGroup()
+        groupSection(g, targetId).put("enabled", enabled)
+        saveGroup(g)
+        updateGroupStatus()
+        updateOverlay()
+    }
+
+    private fun removeGroupIndividual(targetId: String, playerId: String) {
+        val g = getGroup()
+        val sec = groupSection(g, targetId)
+        val arr = sec.optJSONArray("playerIds") ?: JSONArray()
+        val newArr = JSONArray()
+        for (i in 0 until arr.length()) {
+            val pid = arr.getString(i)
+            if (pid != playerId) newArr.put(pid)
+        }
+        sec.put("playerIds", newArr)
+        saveGroup(g)
+        renderGroupPlanner()
+        updateGroupStatus()
+    }
+
+    // Parse "HH:mm:ss" (UTC) to epoch ms (today, or tomorrow if more than 12h in the past).
+    private fun groupLandingMs(timeStr: String): Long? {
+        if (timeStr.length < 5) return null
+        val sdf = SimpleDateFormat("HH:mm:ss", Locale.US)
+        sdf.timeZone = TimeZone.getTimeZone("UTC")
+        val parsed = try { sdf.parse(timeStr) } catch (e: Exception) { null } ?: return null
+        val now = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+        val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+        val p = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { time = parsed }
+        cal.set(Calendar.HOUR_OF_DAY, p.get(Calendar.HOUR_OF_DAY))
+        cal.set(Calendar.MINUTE, p.get(Calendar.MINUTE))
+        cal.set(Calendar.SECOND, p.get(Calendar.SECOND))
+        cal.set(Calendar.MILLISECOND, 0)
+        if (cal.timeInMillis < now.timeInMillis - 12L * 60 * 60 * 1000) cal.add(Calendar.DAY_OF_YEAR, 1)
+        return cal.timeInMillis
+    }
+
+    private fun playerMarchSec(playerId: String, mtField: String): Long {
+        val p = getStoredPlayers().find { it.optString("id") == playerId } ?: return 0L
+        return p.optLong(mtField, 0L)
+    }
+
+    private fun updateGroupStatus() {
+        if (!::tvGroupStatus.isInitialized) return
+        val g = getGroup()
+        var assigned = 0
+        var missing = 0
+        for ((id, _, mtField) in groupTargets) {
+            if (!sectionEnabled(g, id)) continue
+            for (pid in groupSectionPlayerIds(g, id)) {
+                assigned++
+                if (playerMarchSec(pid, mtField) <= 0L) missing++
+            }
+        }
+        tvGroupStatus.text = if (assigned == 0) "No forces assigned yet."
+            else "$assigned assigned · ${assigned - missing} ready, $missing missing march (excluded from plan)"
+    }
+
+    // Earliest feasible landing = now + max(march + 300s) over all assigned players (+ 30s prep buffer).
+    private fun suggestGroupLandingTime(): String? {
+        val g = getGroup()
+        var maxReq = 300L
+        var any = false
+        for ((id, _, mtField) in groupTargets) {
+            if (!sectionEnabled(g, id)) continue
+            for (pid in groupSectionPlayerIds(g, id)) {
+                any = true
+                val req = playerMarchSec(pid, mtField) + 300L
+                if (req > maxReq) maxReq = req
+            }
+        }
+        if (!any) return null
+        val ms = System.currentTimeMillis() + (maxReq + 30L) * 1000L
+        val sdf = SimpleDateFormat("HH:mm:ss", Locale.US)
+        sdf.timeZone = TimeZone.getTimeZone("UTC")
+        return sdf.format(Date(ms))
+    }
+
+    // Combined <=500-char plan across all targets. Players with no march time are skipped.
+    private fun buildGroupPlan(): String? {
+        val g = getGroup()
+        val timeStr = g.optString("landingTime", "")
+        val baseMs = groupLandingMs(timeStr) ?: return null
+        val castleOffset = g.optInt("castleOffset", 0)
+        val players = getStoredPlayers()
+        val sdf = SimpleDateFormat("HH:mm:ss", Locale.US)
+        sdf.timeZone = TimeZone.getTimeZone("UTC")
+
+        fun nameOf(pid: String) = players.find { it.optString("id") == pid }?.optString("name") ?: "?"
+
+        fun build(trunc: Int?): String {
+            val sb = StringBuilder()
+            sb.append("⚔️ GROUP: $timeStr UTC\n")
+            for ((id, name, mtField) in groupTargets) {
+                if (!sectionEnabled(g, id)) continue
+                val ids = groupSectionPlayerIds(g, id)
+                if (ids.isEmpty()) continue
+                val targetMs = baseMs + (if (id == "castle") castleOffset * 1000L else 0L)
+                var line = 0
+                val body = StringBuilder()
+                for (pid in ids) {
+                    val march = playerMarchSec(pid, mtField)
+                    if (march <= 0L) continue
+                    line++
+                    val launchMs = targetMs - march * 1000L - 300000L
+                    var pName = nameOf(pid)
+                    if (trunc != null && pName.length > trunc) pName = pName.substring(0, trunc) + ".."
+                    body.append("$line $pName @ ${sdf.format(Date(launchMs))}\n")
+                }
+                if (line > 0) {
+                    sb.append("🎯 ${name.uppercase()}:\n")
+                    sb.append(body)
+                }
+            }
+            return sb.toString().trimEnd()
+        }
+
+        var text = build(null)
+        if (text.length > 500) text = build(10)
+        if (text.length > 500) text = build(6)
+        return text
+    }
+
+    private fun renderGroupPlanner() {
+        if (!::llGroupSections.isInitialized) return
+        llGroupSections.removeAllViews()
+        val g = getGroup()
+        val teams = getStoredTeams()
+        val players = getStoredPlayers()
+        val globallyAssigned = allAssignedPlayerIds(g)
+
+        for ((id, name, mtField) in groupTargets) {
+            val sec = groupSection(g, id)
+            val enabled = sec.optBoolean("enabled", true)
+            val indivArr = sec.optJSONArray("playerIds") ?: JSONArray()
+            val indivIds = (0 until indivArr.length()).map { indivArr.getString(it) }
+            val assignedIds = groupSectionPlayerIds(g, id)
+
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundColor(Color.parseColor("#171717"))
+                setPadding(20, 16, 20, 16)
+                alpha = if (enabled) 1f else 0.45f
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { setMargins(0, 0, 0, 16) }
+            }
+
+            // Header: include checkbox + name + count
+            val headerRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, 0, 0, 8)
+            }
+            val cbInclude = CheckBox(this).apply {
+                isChecked = enabled
+                buttonTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#EAB308"))
+                setOnCheckedChangeListener { _, checked -> setSectionEnabled(id, checked); renderGroupPlanner() }
+            }
+            val headerText = TextView(this).apply {
+                text = "${name.uppercase()}  ·  ${assignedIds.size} assigned"
+                setTextColor(Color.parseColor("#EAB308"))
+                textSize = 13f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+            }
+            headerRow.addView(cbInclude)
+            headerRow.addView(headerText)
+            card.addView(headerRow)
+
+            // Team spinner
+            val teamNames = mutableListOf("— No team —")
+            val teamIds = mutableListOf("")
+            for (t in teams) { teamNames.add(t.optString("name")); teamIds.add(t.optString("id")) }
+            val teamSpinner = Spinner(this).apply {
+                background = getDrawable(android.R.drawable.btn_dropdown)
+                adapter = ArrayAdapter(this@OfflineActivity, android.R.layout.simple_spinner_item, teamNames).also {
+                    it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+                }
+                val cur = teamIds.indexOf(sec.optString("teamId", ""))
+                if (cur >= 0) setSelection(cur)
+            }
+            teamSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, rowId: Long) {
+                    val current = getGroup().optJSONObject("sections")?.optJSONObject(id)?.optString("teamId", "") ?: ""
+                    val picked = teamIds.getOrElse(position) { "" }
+                    if (picked == current) return
+                    val g2 = getGroup(); groupSection(g2, id).put("teamId", picked); saveGroup(g2)
+                    renderGroupPlanner(); updateGroupStatus()
+                }
+                override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+            }
+            card.addView(teamSpinner)
+
+            // Assigned players: team players are read-only; individual extras get a remove (✕).
+            if (assignedIds.isEmpty()) {
+                card.addView(TextView(this).apply {
+                    text = "No players."
+                    setTextColor(Color.parseColor("#666666"))
+                    textSize = 12f
+                    setPadding(0, 6, 0, 0)
+                })
+            } else {
+                for (pid in assignedIds) {
+                    val p = players.find { it.optString("id") == pid } ?: continue
+                    val isIndividual = indivIds.contains(pid)
+                    val march = p.optLong(mtField, 0L)
+                    val row = LinearLayout(this).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = android.view.Gravity.CENTER_VERTICAL
+                        setPadding(0, 6, 0, 0)
+                    }
+                    val nameTv = TextView(this).apply {
+                        val src = if (isIndividual) "" else "  ·team"
+                        text = if (march > 0L) "• ${p.optString("name")} (${march}s)$src"
+                            else "• ${p.optString("name")}  ⚠ no march$src"
+                        setTextColor(if (march > 0L) Color.parseColor("#B0B0B0") else Color.parseColor("#CF6679"))
+                        textSize = 12f
+                        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    }
+                    row.addView(nameTv)
+                    if (isIndividual) {
+                        val btnX = Button(this).apply {
+                            text = "✕"
+                            setBackgroundColor(Color.parseColor("#3A1A1A"))
+                            setTextColor(Color.parseColor("#CF6679"))
+                            textSize = 10f
+                            setPadding(0, 0, 0, 0)
+                            layoutParams = LinearLayout.LayoutParams(
+                                (30 * resources.displayMetrics.density + 0.5f).toInt(),
+                                (30 * resources.displayMetrics.density + 0.5f).toInt()
+                            )
+                            setOnClickListener { removeGroupIndividual(id, pid) }
+                        }
+                        row.addView(btnX)
+                    }
+                    card.addView(row)
+                }
+            }
+
+            // Add individual player spinner — excludes anyone already placed on ANY target.
+            val addNames = mutableListOf("+ Add extra player")
+            val addIds = mutableListOf("")
+            for (p in players) {
+                val pid = p.optString("id")
+                if (!globallyAssigned.contains(pid)) { addNames.add(p.optString("name")); addIds.add(pid) }
+            }
+            val addSpinner = Spinner(this).apply {
+                background = getDrawable(android.R.drawable.btn_dropdown)
+                adapter = ArrayAdapter(this@OfflineActivity, android.R.layout.simple_spinner_item, addNames).also {
+                    it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { setMargins(0, 10, 0, 0) }
+            }
+            addSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, rowId: Long) {
+                    if (position <= 0) return
+                    val g2 = getGroup()
+                    val s = groupSection(g2, id)
+                    val arr = s.optJSONArray("playerIds") ?: JSONArray().also { s.put("playerIds", it) }
+                    arr.put(addIds.getOrElse(position) { "" })
+                    saveGroup(g2)
+                    renderGroupPlanner()
+                    updateGroupStatus()
+                }
+                override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+            }
+            card.addView(addSpinner)
+
+            llGroupSections.addView(card)
         }
     }
 
@@ -1058,14 +1543,21 @@ class OfflineActivity : AppCompatActivity() {
         // Sort by offset to match execution sequence
         playersDataList.sortBy { it.offsetSec }
 
-        for ((idx, player) in playersDataList.withIndex()) {
+        val missingNames = mutableListOf<String>()
+        var lineNo = 0
+        for (player in playersDataList) {
+            // Never broadcast a launch we can't compute — skip players with no march time set.
+            if (player.marchSec <= 0L) { missingNames.add(player.name); continue }
+            lineNo++
             // Launch time = Landing Time + playerOffset - marchTime - rallyTime (300s)
             val launchTimeMs = targetTime.timeInMillis + (player.offsetSec * 1000L) - (player.marchSec * 1000L) - 300000L
-            val launchDate = Date(launchTimeMs)
-
-            val launchStr = sdf.format(launchDate)
-            displayBuilder.append("${idx + 1}. [${player.name}] => Launch: $launchStr UTC\n")
-            planBuilder.append("${idx + 1}. [${player.name}] => LAUNCH: $launchStr UTC (M: ${player.marchSec}s | D: +${player.offsetSec}s)\n")
+            val launchStr = sdf.format(Date(launchTimeMs))
+            displayBuilder.append("$lineNo. [${player.name}] => Launch: $launchStr UTC\n")
+            planBuilder.append("$lineNo. [${player.name}] => LAUNCH: $launchStr UTC (M: ${player.marchSec}s | D: +${player.offsetSec}s)\n")
+        }
+        // Flag anyone excluded so the commander fixes it (kept out of the clipboard plan).
+        if (missingNames.isNotEmpty()) {
+            displayBuilder.append("\n⚠ No march time: ${missingNames.joinToString(", ")}")
         }
 
         return LaunchReport(displayBuilder.toString(), planBuilder.toString())
